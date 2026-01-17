@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import torch
 from PIL import Image
 import io
 import base64
@@ -117,7 +118,7 @@ class Shaobkj_Reverse_Node:
         if base_url.endswith("/v1"):
             base_url = base_url[:-3]
 
-        url = f"{base_url}/v1beta/models/{model}:generateContent?key={api_key}"
+        url = f"{base_url}/v1beta/models/{model}:generateContent"
 
         parts = [{"text": prompt}]
 
@@ -126,23 +127,31 @@ class Shaobkj_Reverse_Node:
                 batch_size = img_tensor_batch.shape[0]
                 for i in range(batch_size):
                     img_tensor = img_tensor_batch[i]
-                    img_np = np.clip(255.0 * img_tensor.cpu().numpy(), 0, 255).astype(np.uint8)
-                    pil_img = Image.fromarray(img_np)
+                    if isinstance(img_tensor, torch.Tensor):
+                        img_u8 = (img_tensor.clamp(0, 1) * 255).to(torch.uint8).cpu().numpy()
+                    else:
+                        img_u8 = np.clip(255.0 * np.array(img_tensor), 0, 255).astype(np.uint8)
+                    pil_img = Image.fromarray(img_u8)
                     pil_img = resize_pil_long_side(pil_img, 长边设置)
 
                     buffered = io.BytesIO()
-                    pil_img.save(buffered, format="JPEG", quality=90)
+                    pil_img.save(buffered, format="JPEG", quality=85)
                     img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
                     parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img_b64}})
 
         payload = {"contents": [{"role": "user", "parts": parts}]}
         # 将 seed 放入 generationConfig，这才是 Gemini API 的标准做法
-        payload["generationConfig"] = {"seed": seed_value}
+        safe_seed = int(seed_value)
+        if safe_seed < 0:
+            safe_seed = 0
+        if safe_seed > 2147483647:
+            safe_seed = safe_seed % 2147483647
+        payload["generationConfig"] = {"seed": safe_seed}
 
         if 谷歌搜索:
             payload["tools"] = [{"googleSearch": {}}]
 
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
 
         print(f"[ComfyUI-shaobkj] Sending inference request to {base_url} (Model: {model})...")
         pbar = ProgressBar(100)
@@ -185,7 +194,12 @@ class Shaobkj_Reverse_Node:
             if not generated_text:
                 generated_text = "No text response generated."
             pbar.update_absolute(100)
-            return (generated_text, json.dumps(res_json, ensure_ascii=False))
+            api_resp_text = json.dumps(res_json, ensure_ascii=False)
+            if not isinstance(api_resp_text, str):
+                api_resp_text = str(api_resp_text)
+            if len(api_resp_text) > 8000:
+                api_resp_text = api_resp_text[:8000] + "...(truncated)"
+            return (generated_text, api_resp_text)
         except Exception as e:
             error_msg = f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
             print(f"[ComfyUI-shaobkj] Inference Error: {error_msg}")
