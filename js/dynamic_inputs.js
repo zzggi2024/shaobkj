@@ -40,6 +40,8 @@ function manageInputs(node) {
         node.inputs = [];
     }
 
+    let changed = false;
+
     const imageInputs = [];
     for (let i = 0; i < node.inputs.length; i++) {
         if (node.inputs[i].name && node.inputs[i].name.startsWith(INPUT_PREFIX)) {
@@ -71,6 +73,7 @@ function manageInputs(node) {
         
         if (existingIndex === -1) {
             node.addInput(name, "IMAGE");
+            changed = true;
         }
     }
     
@@ -97,16 +100,25 @@ function manageInputs(node) {
                 const input = node.inputs[inputIndex];
                 if (input.link === null) {
                     node.removeInput(inputIndex);
+                    changed = true;
                 }
             }
         }
     }
 
-    node.onResize?.(node.size);
-    node.setDirtyCanvas(true, true);
-    setupLinkWidget(node);
-    setupLongSideWidget(node);
-    setupNodeStyle(node);
+    if (setupLinkWidget(node)) {
+        changed = true;
+    }
+    if (setupLongSideWidget(node)) {
+        changed = true;
+    }
+    if (setupNodeStyle(node)) {
+        changed = true;
+    }
+    if (changed) {
+        node.onResize?.(node.size);
+        node.setDirtyCanvas(true, true);
+    }
 }
 
 function setupLinkWidget(node) {
@@ -116,7 +128,7 @@ function setupLinkWidget(node) {
 
     const widget = node.widgets[index];
     if (widget.type === "button" && widget.label === "🔗 打开 API 申请地址" && widget.callback) {
-        return;
+        return false;
     }
 
     const url = "https://yhmx.work/login?expired=true";
@@ -137,6 +149,7 @@ function setupLinkWidget(node) {
     }
 
     node.setDirtyCanvas(true, true);
+    return true;
 }
 
 function setupLongSideWidget(node) {
@@ -144,13 +157,25 @@ function setupLongSideWidget(node) {
     if (!isShaobkjRuntimeNode(node)) return;
     const widget = findWidget(node, LONG_SIDE_WIDGET_NAME);
     if (!widget) return;
-    widget.label = LONG_SIDE_WIDGET_LABEL;
+    if (widget.label !== LONG_SIDE_WIDGET_LABEL) {
+        widget.label = LONG_SIDE_WIDGET_LABEL;
+        return true;
+    }
+    return false;
 }
 
 function setupNodeStyle(node) {
     if (!isShaobkjRuntimeNode(node)) return;
-    if (node.color !== SHAOBKJ_NODE_COLOR) node.color = SHAOBKJ_NODE_COLOR;
-    if (node.bgcolor !== SHAOBKJ_NODE_BGCOLOR) node.bgcolor = SHAOBKJ_NODE_BGCOLOR;
+    let changed = false;
+    if (node.color !== SHAOBKJ_NODE_COLOR) {
+        node.color = SHAOBKJ_NODE_COLOR;
+        changed = true;
+    }
+    if (node.bgcolor !== SHAOBKJ_NODE_BGCOLOR) {
+        node.bgcolor = SHAOBKJ_NODE_BGCOLOR;
+        changed = true;
+    }
+    return changed;
 }
 
 function findWidget(node, name) {
@@ -181,7 +206,6 @@ app.registerExtension({
                 }
             }
         };
-        setInterval(tick, 250);
         setTimeout(tick, 200);
     },
     async init(app) {

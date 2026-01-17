@@ -1,14 +1,18 @@
 import json
-import requests
 import numpy as np
 from PIL import Image
 import io
 import base64
-import random
-import time
 import traceback
 
-from .shaobkj_shared import get_config_value, resize_pil_long_side
+from .shaobkj_shared import (
+    build_submit_timeout,
+    create_requests_session,
+    disable_insecure_request_warnings,
+    get_config_value,
+    post_json_with_retry,
+    resize_pil_long_side,
+)
 from comfy.utils import ProgressBar
 
 
@@ -51,7 +55,7 @@ class Shaobkj_Reverse_Node:
         system_prompt = 系统提示词.strip() if isinstance(系统提示词, str) else ""
         user_prompt = 需求提示词.strip() if isinstance(需求提示词, str) else ""
         seed_value = seed
-        prompt = (system_prompt + "\n\n" if system_prompt else "") + user_prompt + f"\n\n[Seed]\n{seed_value}"
+        prompt = (system_prompt + "\n\n" if system_prompt else "") + user_prompt
         timeout_val = None if int(等待时间) == 0 else int(等待时间)
 
         def extract_error(obj):
@@ -132,6 +136,9 @@ class Shaobkj_Reverse_Node:
                     parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img_b64}})
 
         payload = {"contents": [{"role": "user", "parts": parts}]}
+        # 将 seed 放入 generationConfig，这才是 Gemini API 的标准做法
+        payload["generationConfig"] = {"seed": seed_value}
+
         if 谷歌搜索:
             payload["tools"] = [{"googleSearch": {}}]
 
@@ -141,18 +148,21 @@ class Shaobkj_Reverse_Node:
         pbar = ProgressBar(100)
         pbar.update_absolute(0)
 
-        session = requests.Session()
-        session.trust_env = bool(使用系统代理)
-        proxies = {} if not 使用系统代理 else None
+        disable_insecure_request_warnings()
+        session, proxies = create_requests_session(bool(使用系统代理))
+        submit_timeout = build_submit_timeout(int(等待时间))
 
         try:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        except Exception:
-            pass
+            response = post_json_with_retry(
+                session,
+                url,
+                headers=headers,
+                payload=payload,
+                timeout=submit_timeout,
+                proxies=proxies,
+                verify=False,
+            )
 
-        try:
-            response = session.post(url, headers=headers, json=payload, timeout=timeout_val, verify=False, proxies=proxies)
             if response.status_code != 200:
                 print(f"[ComfyUI-shaobkj] API Error: {response.status_code}")
                 try:

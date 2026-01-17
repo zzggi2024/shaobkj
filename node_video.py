@@ -10,7 +10,16 @@ import numpy as np
 from PIL import Image
 from urllib.parse import urlparse
 import folder_paths
-from .shaobkj_shared import get_config_value, resize_pil_long_side, tensor_to_pil
+from .shaobkj_shared import (
+    auth_headers_for_same_origin,
+    build_submit_timeout,
+    create_requests_session,
+    disable_insecure_request_warnings,
+    get_config_value,
+    post_with_retry,
+    resize_pil_long_side,
+    tensor_to_pil,
+)
 from comfy_api.latest import InputImpl
 from comfy.utils import ProgressBar
 
@@ -133,7 +142,9 @@ class Shaobkj_Sora_Video:
             "size": api_size,
             "watermark": "false", # 默认无水印
             "private": "false",   # 默认公开
-            "seed": str(seed),
+            # ComfyUI 的 seed 是 INT 类型，无需手动转 str，requests/json 会自动处理
+            # 保持 INT 类型能确保与 ComfyUI 的逻辑一致，且大多数 JSON API 都接受数字类型的 seed
+            "seed": seed,
         }
 
         # 可选参数
@@ -193,31 +204,23 @@ class Shaobkj_Sora_Video:
         }
 
         timeout_val = None if int(等待时间) == 0 else int(等待时间)
-
-        # SSL 验证绕过
-        try:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        except: pass
-
-        session = requests.Session()
-        session.trust_env = bool(使用系统代理)
-        if not 使用系统代理:
-            session.proxies = {}
-        proxies = {} if not 使用系统代理 else None
+        disable_insecure_request_warnings()
+        session, proxies = create_requests_session(bool(使用系统代理))
+        submit_timeout = build_submit_timeout(int(等待时间))
 
         print(f"[Shaobkj-Sora] Sending request to {api_url}...")
         print(f"[Shaobkj-Sora] Payload: {payload_data}")
         
         try:
-            resp = session.post(
-                api_url, 
-                headers=headers, 
-                data=payload_data, 
-                files=files if files else None, 
-                verify=False, 
-                timeout=timeout_val,
-                proxies=proxies
+            resp = post_with_retry(
+                session,
+                api_url,
+                headers=headers,
+                timeout=submit_timeout,
+                proxies=proxies,
+                verify=False,
+                data=payload_data,
+                files=files if files else None,
             )
         except Exception as e:
             error_msg = f"Connection Failed: {str(e)}\n{traceback.format_exc()}"
@@ -358,20 +361,16 @@ class Shaobkj_Sora_Video:
         print(f"[Shaobkj-Sora] Downloading video from {video_url}...")
         file_path = ""
         try:
-            send_headers = False
-            try:
-                send_headers = bool(headers) and bool(api_origin) and urlparse(str(video_url)).netloc == api_origin
-            except Exception:
-                send_headers = False
+            dl_headers = auth_headers_for_same_origin(str(video_url), api_origin, headers or {})
 
             if session:
-                if send_headers:
-                    v_resp = session.get(video_url, headers=headers, stream=True, verify=False, timeout=60)
+                if dl_headers:
+                    v_resp = session.get(video_url, headers=dl_headers, stream=True, verify=False, timeout=60)
                 else:
                     v_resp = session.get(video_url, stream=True, verify=False, timeout=60)
             else:
-                if send_headers:
-                    v_resp = requests.get(video_url, headers=headers, stream=True, verify=False, timeout=60)
+                if dl_headers:
+                    v_resp = requests.get(video_url, headers=dl_headers, stream=True, verify=False, timeout=60)
                 else:
                     v_resp = requests.get(video_url, stream=True, verify=False, timeout=60)
             v_resp.raise_for_status()

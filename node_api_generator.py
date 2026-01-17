@@ -1,6 +1,5 @@
 import os
 import json
-import requests
 import torch
 import numpy as np
 from PIL import Image
@@ -13,7 +12,17 @@ import time
 import traceback
 from urllib.parse import urlparse
 
-from .shaobkj_shared import get_config_value, pil_to_tensor, resize_pil_long_side, tensor_to_pil
+from .shaobkj_shared import (
+    auth_headers_for_same_origin,
+    build_submit_timeout,
+    create_requests_session,
+    disable_insecure_request_warnings,
+    get_config_value,
+    pil_to_tensor,
+    post_json_with_retry,
+    resize_pil_long_side,
+    tensor_to_pil,
+)
 from comfy.utils import ProgressBar
 
 
@@ -117,16 +126,16 @@ class Shaobkj_APINode:
                     pil_img = tensor_to_pil(img_tensor[bi])
                     pil_img = resize_pil_long_side(pil_img, long_side)
                     buffered = io.BytesIO()
-                    pil_img.save(buffered, format="PNG")
+                    pil_img.save(buffered, format="JPEG", quality=85)
                     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}})
+                    content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}})
             else:
                 pil_img = tensor_to_pil(img_tensor)
                 pil_img = resize_pil_long_side(pil_img, long_side)
                 buffered = io.BytesIO()
-                pil_img.save(buffered, format="PNG")
+                pil_img.save(buffered, format="JPEG", quality=85)
                 img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}})
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}})
 
         messages.append({"role": "user", "content": content})
 
@@ -185,8 +194,7 @@ class Shaobkj_APINode:
                 if isinstance(data_item, dict) and "url" in data_item:
                     image_url = data_item["url"]
                     download_timeout = 60 if timeout_val is None else timeout_val
-                    auth_headers = {"Authorization": f"Bearer {api_key}"}
-                    img_headers = auth_headers if urlparse(str(image_url)).netloc == api_origin else None
+                    img_headers = auth_headers_for_same_origin(str(image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
                     img_res = session.get(image_url, verify=False, timeout=download_timeout, proxies=proxies, headers=img_headers)
                     img_res.raise_for_status()
                     image = Image.open(io.BytesIO(img_res.content))
@@ -213,8 +221,7 @@ class Shaobkj_APINode:
                 if valid_image_url:
                     try:
                         download_timeout = 60 if timeout_val is None else timeout_val
-                        auth_headers = {"Authorization": f"Bearer {api_key}"}
-                        img_headers = auth_headers if urlparse(str(valid_image_url)).netloc == api_origin else None
+                        img_headers = auth_headers_for_same_origin(str(valid_image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
                         img_res = session.get(valid_image_url, verify=False, timeout=download_timeout, proxies=proxies, headers=img_headers)
                         img_res.raise_for_status()
                         image = Image.open(io.BytesIO(img_res.content))
@@ -251,24 +258,20 @@ class Shaobkj_APINode:
 
             return None
 
-        session = requests.Session()
-        session.trust_env = bool(使用系统代理)
-        if not 使用系统代理:
-            session.proxies = {}
-        proxies = {} if not 使用系统代理 else None
-
-        wait_seconds = int(等待时间)
-        submit_read_timeout = 600 if wait_seconds == 0 else max(60, wait_seconds)
-        submit_timeout = (10, submit_read_timeout)
+        disable_insecure_request_warnings()
+        session, proxies = create_requests_session(bool(使用系统代理))
+        submit_timeout = build_submit_timeout(int(等待时间))
 
         try:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        except Exception:
-            pass
-
-        try:
-            response = session.post(url, headers=headers, json=payload, timeout=submit_timeout, verify=False, proxies=proxies)
+            response = post_json_with_retry(
+                session,
+                url,
+                headers=headers,
+                payload=payload,
+                timeout=submit_timeout,
+                proxies=proxies,
+                verify=False,
+            )
             pbar.update_absolute(50)
 
             if response.status_code not in (200, 201, 202):
@@ -362,7 +365,15 @@ class Shaobkj_APINode:
                     "user": "comfyui-shaobkj-user",
                     "seed": seed_value,
                 }
-                img_resp = session.post(img_url, headers=headers, json=img_payload, timeout=submit_timeout, verify=False, proxies=proxies)
+                img_resp = post_json_with_retry(
+                    session,
+                    img_url,
+                    headers=headers,
+                    payload=img_payload,
+                    timeout=submit_timeout,
+                    proxies=proxies,
+                    verify=False,
+                )
                 if img_resp.status_code not in (200, 201, 202):
                     try:
                         err_json = img_resp.json()

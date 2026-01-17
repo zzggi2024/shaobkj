@@ -10,7 +10,16 @@ import numpy as np
 from PIL import Image
 from urllib.parse import urlparse
 import folder_paths
-from .shaobkj_shared import get_config_value, resize_pil_long_side, tensor_to_pil
+from .shaobkj_shared import (
+    auth_headers_for_same_origin,
+    build_submit_timeout,
+    create_requests_session,
+    disable_insecure_request_warnings,
+    get_config_value,
+    post_with_retry,
+    resize_pil_long_side,
+    tensor_to_pil,
+)
 from comfy_api.latest import InputImpl
 from comfy.utils import ProgressBar
 
@@ -108,7 +117,8 @@ class Shaobkj_Veo_Video:
             "size": api_size,
             "watermark": "false",
             "private": "false",
-            "seed": str(seed),
+            # ComfyUI 的 seed 是 INT 类型，保持 INT 类型传递给 API
+            "seed": seed,
         }
 
         files = {}
@@ -125,32 +135,25 @@ class Shaobkj_Veo_Video:
             files["input_reference"] = ("reference_image.png", buffered.getvalue(), "image/png")
 
         timeout_val = None if int(等待时间) == 0 else int(等待时间)
+        submit_timeout = build_submit_timeout(int(等待时间))
 
         headers = {"Authorization": f"Bearer {API密钥}"}
 
-        try:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        except Exception:
-            pass
-
-        session = requests.Session()
-        session.trust_env = bool(使用系统代理)
-        if not 使用系统代理:
-            session.proxies = {}
-        proxies = {} if not 使用系统代理 else None
+        disable_insecure_request_warnings()
+        session, proxies = create_requests_session(bool(使用系统代理))
 
         print(f"[Shaobkj-Veo] Sending request to {api_url}...")
 
         try:
-            resp = session.post(
+            resp = post_with_retry(
+                session,
                 api_url,
                 headers=headers,
+                timeout=submit_timeout,
+                proxies=proxies,
+                verify=False,
                 data=payload_data,
                 files=files if files else None,
-                verify=False,
-                timeout=timeout_val,
-                proxies=proxies
             )
         except Exception as e:
             error_msg = f"Connection Failed: {str(e)}\n{traceback.format_exc()}"
@@ -289,20 +292,16 @@ class Shaobkj_Veo_Video:
         print(f"[Shaobkj-Veo] Downloading video from {video_url}...")
         file_path = ""
         try:
-            send_headers = False
-            try:
-                send_headers = bool(headers) and bool(api_origin) and urlparse(str(video_url)).netloc == api_origin
-            except Exception:
-                send_headers = False
+            dl_headers = auth_headers_for_same_origin(str(video_url), api_origin, headers or {})
 
             if session:
-                if send_headers:
-                    v_resp = session.get(video_url, headers=headers, stream=True, verify=False, timeout=60)
+                if dl_headers:
+                    v_resp = session.get(video_url, headers=dl_headers, stream=True, verify=False, timeout=60)
                 else:
                     v_resp = session.get(video_url, stream=True, verify=False, timeout=60)
             else:
-                if send_headers:
-                    v_resp = requests.get(video_url, headers=headers, stream=True, verify=False, timeout=60)
+                if dl_headers:
+                    v_resp = requests.get(video_url, headers=dl_headers, stream=True, verify=False, timeout=60)
                 else:
                     v_resp = requests.get(video_url, stream=True, verify=False, timeout=60)
             v_resp.raise_for_status()
