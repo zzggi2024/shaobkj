@@ -38,11 +38,20 @@ class Shaobkj_APINode:
                 "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True}),
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
+                "模型选择": (
+                    [
+                        "gemini-3-pro-image-preview",
+                    ],
+                    {"default": "gemini-3-pro-image-preview"},
+                ),
                 "使用系统代理": ("BOOLEAN", {"default": False}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
-                "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21"],),
+                "图片比例": (
+                    ["原图1比例", "Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21"],
+                    {"default": "原图1比例"},
+                ),
                 "长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
-                "等待时间": ("INT", {"default": 0, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
+                "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
             },
@@ -57,25 +66,35 @@ class Shaobkj_APINode:
     FUNCTION = "generate_image"
     CATEGORY = "🤖shaobkj-APIbox"
 
-    def get_resolution(self, aspect_ratio):
-        ratios = {
-            "1:1": (1024, 1024),
-            "16:9": (1344, 768),
-            "9:16": (768, 1344),
-            "4:3": (1152, 864),
-            "3:4": (864, 1152),
-            "3:2": (1216, 832),
-            "2:3": (832, 1216),
-            "21:9": (1536, 640),
-            "9:21": (640, 1536),
-            "Free": (1024, 1024),
-        }
-        return ratios.get(aspect_ratio, (1024, 1024))
+    def get_target_size(self, resolution, aspect_ratio):
+        target_map = {"1k": 1024, "2k": 2048, "4k": 4096}
+        target = target_map.get(str(resolution).lower(), 1024)
 
-    def generate_image(self, API密钥, API地址, 使用系统代理, 分辨率, 提示词, 图片比例, 长边设置, 等待时间, seed, **kwargs):
+        ar = str(aspect_ratio or "Free")
+        if ar == "Free":
+            return target, target
+        if ":" in ar:
+            try:
+                a, b = ar.split(":", 1)
+                aw = float(a)
+                ah = float(b)
+                if aw > 0 and ah > 0:
+                    r = aw / ah
+                    if r >= 1.0:
+                        w = target
+                        h = max(1, int(round(target / r)))
+                    else:
+                        h = target
+                        w = max(1, int(round(target * r)))
+                    return int(w), int(h)
+            except Exception:
+                pass
+        return target, target
+
+    def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 长边设置, 等待时间, seed, **kwargs):
         api_key = API密钥
-        base_url = str(API地址).rstrip("/")
-        api_origin = urlparse(base_url).netloc
+        base_origin = str(API地址).rstrip("/")
+        api_origin = urlparse(base_origin).netloc
         resolution = 分辨率
         prompt = 提示词
         aspect_ratio = 图片比例
@@ -88,18 +107,31 @@ class Shaobkj_APINode:
         if not api_key:
             raise ValueError("API Key is required.")
 
-        model_map = {
-            "1k": "gemini-3-pro-image-preview",
-            "2k": "gemini-3-pro-image-preview-2k",
-            "4k": "gemini-3-pro-image-preview-4k",
-        }
-        model = model_map.get(resolution, "gemini-3-pro-image-preview")
+        model = 模型选择
 
-        if not base_url.endswith("/v1"):
-            base_url += "/v1"
-
-        if aspect_ratio and aspect_ratio != "Free":
-            prompt = f"{prompt} --ar {aspect_ratio}"
+        if aspect_ratio == "原图1比例":
+            img1 = kwargs.get("image_1")
+            if img1 is None:
+                img1 = kwargs.get("参考图1")
+            if img1 is not None:
+                pil_img = tensor_to_pil(img1)
+                w, h = pil_img.size
+                if w and h:
+                    target_ratio = w / float(h)
+                    ratio_map = {
+                        "1:1": 1.0,
+                        "16:9": 16.0 / 9.0,
+                        "9:16": 9.0 / 16.0,
+                        "4:3": 4.0 / 3.0,
+                        "3:4": 3.0 / 4.0,
+                        "3:2": 3.0 / 2.0,
+                        "2:3": 2.0 / 3.0,
+                        "21:9": 21.0 / 9.0,
+                        "9:21": 9.0 / 21.0,
+                    }
+                    aspect_ratio = min(ratio_map.keys(), key=lambda k: abs(ratio_map[k] - target_ratio))
+            else:
+                aspect_ratio = "Free"
 
         input_images = []
         for i in range(1, 50):
@@ -110,62 +142,40 @@ class Shaobkj_APINode:
             if img_key_old in kwargs and kwargs[img_key_old] is not None:
                 input_images.append(kwargs[img_key_old])
 
-        width, height = self.get_resolution(aspect_ratio)
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
 
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        url = f"{base_origin}/v1beta/models/{model}:generateContent"
 
-        url = f"{base_url}/chat/completions"
-
-        messages = []
-        content = [{"type": "text", "text": prompt}]
-
+        parts = [{"text": prompt}]
         for img_tensor in input_images:
+            tensors = [img_tensor]
             if isinstance(img_tensor, torch.Tensor) and img_tensor.dim() == 4:
-                batch = img_tensor.shape[0]
-                for bi in range(batch):
-                    pil_img = tensor_to_pil(img_tensor[bi])
-                    pil_img = resize_pil_long_side(pil_img, long_side)
-                    buffered = io.BytesIO()
-                    pil_img.save(buffered, format="JPEG", quality=85)
-                    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}})
-            else:
-                pil_img = tensor_to_pil(img_tensor)
+                tensors = [img_tensor[i] for i in range(img_tensor.shape[0])]
+            for t in tensors:
+                pil_img = tensor_to_pil(t)
                 pil_img = resize_pil_long_side(pil_img, long_side)
                 buffered = io.BytesIO()
-                pil_img.save(buffered, format="JPEG", quality=85)
+                pil_img.save(buffered, format="PNG")
                 img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}})
+                parts.append({"inline_data": {"mime_type": "image/png", "data": img_str}})
 
-        messages.append({"role": "user", "content": content})
+        payload = {"contents": [{"role": "user", "parts": parts}]}
+        safe_seed = int(seed_value)
+        if safe_seed < 0:
+            safe_seed = random.randint(0, 2147483647)
+        if safe_seed > 2147483647:
+            safe_seed = safe_seed % 2147483647
 
-        is_dalle_image_api = "dall-e" in model.lower() and not input_images
-        if is_dalle_image_api:
-            url = f"{base_url.replace('/chat/completions', '')}/images/generations"
-            payload = {
-                "model": model,
-                "prompt": prompt,
-                "n": 1,
-                "size": f"{width}x{height}",
-                "response_format": "b64_json",
-                "user": "comfyui-shaobkj-user",
-                "seed": seed_value,
-            }
-        else:
-            payload = {"model": model, "messages": messages, "temperature": temperature, "stream": False}
-            if "gemini" in model.lower():
-                if aspect_ratio and aspect_ratio != "Free":
-                    payload["generationConfig"] = {
-                        "responseModalities": ["TEXT", "IMAGE"],
-                        "imageConfig": {"aspectRatio": aspect_ratio, "imageSize": resolution.upper()},
-                        "seed": seed_value,
-                    }
-                else:
-                    payload["generationConfig"] = {"responseModalities": ["TEXT", "IMAGE"], "seed": seed_value}
+        payload["generationConfig"] = {"temperature": temperature, "seed": safe_seed, "responseModalities": ["TEXT", "IMAGE"]}
+        payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
+        if aspect_ratio and aspect_ratio != "Free":
+            payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(aspect_ratio)
 
         print(f"[ComfyUI-shaobkj] Sending request to {url} with model {model}...")
         pbar = ProgressBar(100)
         pbar.update_absolute(0)
+
+        task_id = None
 
         def return_result(img_tensor, raw_text, pil_image=None):
             ui_info = {"images": []}
@@ -181,7 +191,42 @@ class Shaobkj_APINode:
             pbar.update_absolute(100)
             return {"ui": ui_info, "result": (img_tensor, raw_text)}
 
+        def format_basic_api_response(status, pil_image=None):
+            lines = [
+                f"状态: {status}",
+                f"模型: {model}",
+                f"分辨率: {resolution}",
+                f"图片比例: {aspect_ratio}",
+                f"seed: {safe_seed}",
+            ]
+            if task_id:
+                lines.append(f"任务ID: {task_id}")
+            if pil_image is not None:
+                try:
+                    w, h = pil_image.size
+                    lines.append(f"实际尺寸: {int(w)}x{int(h)}")
+                except Exception:
+                    pass
+            return "\n".join(lines)
+
         def try_extract_image_from_json(res_json):
+            if isinstance(res_json, dict) and "candidates" in res_json and isinstance(res_json["candidates"], list) and res_json["candidates"]:
+                for cand in res_json["candidates"]:
+                    content = cand.get("content") if isinstance(cand, dict) else None
+                    parts = content.get("parts") if isinstance(content, dict) else None
+                    if not isinstance(parts, list):
+                        continue
+                    for part in parts:
+                        if not isinstance(part, dict):
+                            continue
+                        inline = part.get("inlineData") or part.get("inline_data")
+                        if isinstance(inline, dict) and inline.get("data"):
+                            image_data = base64.b64decode(inline["data"])
+                            image = Image.open(io.BytesIO(image_data))
+                            if image.mode != "RGB":
+                                image = image.convert("RGB")
+                            return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
+
             if isinstance(res_json, dict) and "data" in res_json and isinstance(res_json["data"], list) and res_json["data"]:
                 data_item = res_json["data"][0]
                 if isinstance(data_item, dict) and "b64_json" in data_item:
@@ -189,8 +234,7 @@ class Shaobkj_APINode:
                     image = Image.open(io.BytesIO(image_data))
                     if image.mode != "RGB":
                         image = image.convert("RGB")
-                    data_item["b64_json"] = "[Base64 Image Data Truncated]"
-                    return pil_to_tensor(image), json.dumps(res_json, indent=2, ensure_ascii=False), image
+                    return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
                 if isinstance(data_item, dict) and "url" in data_item:
                     image_url = data_item["url"]
                     download_timeout = 60 if timeout_val is None else timeout_val
@@ -200,7 +244,7 @@ class Shaobkj_APINode:
                     image = Image.open(io.BytesIO(img_res.content))
                     if image.mode != "RGB":
                         image = image.convert("RGB")
-                    return pil_to_tensor(image), json.dumps(res_json, indent=2, ensure_ascii=False), image
+                    return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
 
             if isinstance(res_json, dict) and "choices" in res_json and isinstance(res_json["choices"], list) and len(res_json["choices"]) > 0:
                 content_text = res_json["choices"][0].get("message", {}).get("content", "")
@@ -227,8 +271,7 @@ class Shaobkj_APINode:
                         image = Image.open(io.BytesIO(img_res.content))
                         if image.mode != "RGB":
                             image = image.convert("RGB")
-                        display_text = content_text[:2000] + "..." if len(content_text) > 2000 else content_text
-                        return pil_to_tensor(image), display_text, image
+                        return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
                     except Exception:
                         pass
 
@@ -250,9 +293,7 @@ class Shaobkj_APINode:
                         image = Image.open(io.BytesIO(image_data))
                         if image.mode != "RGB":
                             image = image.convert("RGB")
-                        if "choices" in res_json and len(res_json["choices"]) > 0:
-                            res_json["choices"][0]["message"]["content"] = "[Base64 Image Data Truncated]"
-                        return pil_to_tensor(image), json.dumps(res_json, indent=2, ensure_ascii=False), image
+                        return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
                 except Exception:
                     pass
 
@@ -295,7 +336,6 @@ class Shaobkj_APINode:
                 img_tensor, raw_text, pil_image = extracted
                 return return_result(img_tensor, raw_text, pil_image=pil_image)
 
-            task_id = None
             if isinstance(res_json, dict):
                 task_id = res_json.get("id") or res_json.get("task_id")
                 if not task_id and "data" in res_json and isinstance(res_json["data"], dict):
