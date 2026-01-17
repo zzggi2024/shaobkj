@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from urllib.parse import urlparse
 import folder_paths
-from .shaobkj_shared import get_config_value
+from .shaobkj_shared import get_config_value, resize_pil_long_side, tensor_to_pil
 from comfy_api.latest import InputImpl
 from comfy.utils import ProgressBar
 
@@ -46,33 +46,6 @@ class Shaobkj_Veo_Video:
     RETURN_NAMES = ("images", "video", "API响应")
     FUNCTION = "generate_video"
     CATEGORY = "🤖shaobkj-APIbox"
-
-    def tensor2pil(self, image):
-        t = image
-        if isinstance(t, torch.Tensor) and t.dim() == 4:
-            t = t[0]
-        if isinstance(t, torch.Tensor) and t.dim() == 3 and t.shape[0] in (1, 3, 4) and t.shape[-1] not in (1, 3, 4):
-            t = t.permute(1, 2, 0)
-        arr = t.cpu().numpy() if isinstance(t, torch.Tensor) else np.array(t)
-        return Image.fromarray(np.clip(255.0 * arr, 0, 255).astype(np.uint8))
-
-    def resize_pil_long_side(self, image, long_side):
-        try:
-            target = int(long_side)
-        except Exception:
-            return image
-        if target <= 0:
-            return image
-        w, h = image.size
-        m = max(w, h)
-        if m <= target:
-            return image
-        scale = target / float(m)
-        new_w = max(1, int(round(w * scale)))
-        new_h = max(1, int(round(h * scale)))
-        if new_w == w and new_h == h:
-            return image
-        return image.resize((new_w, new_h), resample=Image.LANCZOS)
 
     def generate_video(self, API密钥, API地址, 模型, 使用系统代理, 任务类型, 提示词, 生成时长, 分辨率, 长边设置, 等待时间, seed, 参考图=None, **kwargs):
         if not API密钥:
@@ -146,7 +119,7 @@ class Shaobkj_Veo_Video:
         if final_mode == "图生视频":
             if 参考图 is None:
                 raise ValueError("选择'图生视频'模式时，必须连接'参考图'输入。")
-            pil_img = self.resize_pil_long_side(self.tensor2pil(参考图), 长边设置)
+            pil_img = resize_pil_long_side(tensor_to_pil(参考图), 长边设置)
             buffered = io.BytesIO()
             pil_img.save(buffered, format="PNG")
             files["input_reference"] = ("reference_image.png", buffered.getvalue(), "image/png")

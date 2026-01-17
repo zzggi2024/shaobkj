@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from urllib.parse import urlparse
 import folder_paths
-from .shaobkj_shared import get_config_value
+from .shaobkj_shared import get_config_value, resize_pil_long_side, tensor_to_pil
 from comfy_api.latest import InputImpl
 from comfy.utils import ProgressBar
 
@@ -51,33 +51,6 @@ class Shaobkj_Sora_Video:
     RETURN_NAMES = ("images", "video", "API响应")
     FUNCTION = "generate_video"
     CATEGORY = "🤖shaobkj-APIbox"
-
-    def tensor2pil(self, image):
-        t = image
-        if isinstance(t, torch.Tensor) and t.dim() == 4:
-            t = t[0]
-        if isinstance(t, torch.Tensor) and t.dim() == 3 and t.shape[0] in (1, 3, 4) and t.shape[-1] not in (1, 3, 4):
-            t = t.permute(1, 2, 0)
-        arr = t.cpu().numpy() if isinstance(t, torch.Tensor) else np.array(t)
-        return Image.fromarray(np.clip(255.0 * arr, 0, 255).astype(np.uint8))
-
-    def resize_pil_long_side(self, image, long_side):
-        try:
-            target = int(long_side)
-        except Exception:
-            return image
-        if target <= 0:
-            return image
-        w, h = image.size
-        m = max(w, h)
-        if m <= target:
-            return image
-        scale = target / float(m)
-        new_w = max(1, int(round(w * scale)))
-        new_h = max(1, int(round(h * scale)))
-        if new_w == w and new_h == h:
-            return image
-        return image.resize((new_w, new_h), resample=Image.LANCZOS)
 
     def generate_video(self, API密钥, API地址, 模型, 使用系统代理, 任务类型, 提示词, 生成时长, 分辨率, 长边设置, 等待时间, seed, 参考图=None, 角色视频URL="", 角色时间戳="", **kwargs):
         if not API密钥:
@@ -195,7 +168,7 @@ class Shaobkj_Sora_Video:
             pass
         elif (final_mode == "图生视频" or final_mode == "角色视频") and 参考图 is not None:
             print(f"[Shaobkj-Sora] 执行模式: {final_mode}。启用图生视频/角色模式。")
-            pil_img = self.resize_pil_long_side(self.tensor2pil(参考图), 长边设置)
+            pil_img = resize_pil_long_side(tensor_to_pil(参考图), 长边设置)
             buffered = io.BytesIO()
             pil_img.save(buffered, format="PNG")
             img_bytes = buffered.getvalue()
@@ -205,7 +178,7 @@ class Shaobkj_Sora_Video:
         elif 参考图 is not None:
             # 兼容性 Fallback (理论上不应到达这里，除非强制选了图生视频但没给图，这在上面已校验)
             print(f"[Shaobkj-Sora] 执行模式: {final_mode} (Fallback)。")
-            pil_img = self.resize_pil_long_side(self.tensor2pil(参考图), 长边设置)
+            pil_img = resize_pil_long_side(tensor_to_pil(参考图), 长边设置)
             buffered = io.BytesIO()
             pil_img.save(buffered, format="PNG")
             img_bytes = buffered.getvalue()

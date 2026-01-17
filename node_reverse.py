@@ -8,7 +8,7 @@ import random
 import time
 import traceback
 
-from .shaobkj_shared import get_config_value
+from .shaobkj_shared import get_config_value, resize_pil_long_side
 from comfy.utils import ProgressBar
 
 
@@ -43,24 +43,6 @@ class Shaobkj_Reverse_Node:
     RETURN_NAMES = ("提示词", "API响应")
     FUNCTION = "inference"
     CATEGORY = "🤖shaobkj-APIbox"
-
-    def resize_pil_long_side(self, image, long_side):
-        try:
-            target = int(long_side)
-        except Exception:
-            return image
-        if target <= 0:
-            return image
-        w, h = image.size
-        m = max(w, h)
-        if m <= target:
-            return image
-        scale = target / float(m)
-        new_w = max(1, int(round(w * scale)))
-        new_h = max(1, int(round(h * scale)))
-        if new_w == w and new_h == h:
-            return image
-        return image.resize((new_w, new_h), resample=Image.LANCZOS)
 
     def inference(self, API密钥, API地址, 模型名称, 系统提示词, 需求提示词, 使用系统代理, 长边设置, 等待时间, seed, 谷歌搜索, **kwargs):
         api_key = API密钥
@@ -142,7 +124,7 @@ class Shaobkj_Reverse_Node:
                     img_tensor = img_tensor_batch[i]
                     img_np = np.clip(255.0 * img_tensor.cpu().numpy(), 0, 255).astype(np.uint8)
                     pil_img = Image.fromarray(img_np)
-                    pil_img = self.resize_pil_long_side(pil_img, 长边设置)
+                    pil_img = resize_pil_long_side(pil_img, 长边设置)
 
                     buffered = io.BytesIO()
                     pil_img.save(buffered, format="JPEG", quality=90)
