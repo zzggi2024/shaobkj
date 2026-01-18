@@ -2,18 +2,22 @@
 import { app } from "/scripts/app.js";
 
 const DYNAMIC_NODES = [
-    "Shaobkj_APINode",
     "Shaobkj_Reverse_Node",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
-    "🤖 Shaobkj API Generator",
     "🤖 Shaobkj 反推",
     "🤖 Shaobkj -Sora视频",
     "🤖 Shaobkj -Veo视频",
-    "Shaobkj API Generator",
     "Shaobkj 反推",
     "Shaobkj -Sora视频",
     "Shaobkj -Veo视频",
+];
+const SHAOBKJ_NODE_TYPES = [
+    "Shaobkj_APINode",
+    "Shaobkj_APINode_Batch",
+    "Shaobkj_Reverse_Node",
+    "Shaobkj_Sora_Video",
+    "Shaobkj_Veo_Video",
 ];
 const MIN_INPUTS = 2;
 let started = false;
@@ -21,6 +25,31 @@ const LONG_SIDE_WIDGET_NAME = "长边设置";
 const LONG_SIDE_WIDGET_LABEL = "输入图像-长边设置";
 const SHAOBKJ_NODE_COLOR = "#6C88B8";
 const SHAOBKJ_NODE_BGCOLOR = "#1E2633";
+const SHAOBKJ_TITLE_TEXT_COLOR = "#FF2D2D";
+
+function shouldManageDynamicInputsByNodeData(nodeData) {
+    const name = nodeData?.name || "";
+    const displayName = nodeData?.display_name || nodeData?.displayName || "";
+    if (DYNAMIC_NODES.includes(name)) {
+        return true;
+    }
+    if (displayName && DYNAMIC_NODES.includes(displayName)) {
+        return true;
+    }
+    return false;
+}
+
+function shouldManageDynamicInputsByNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    if (t && DYNAMIC_NODES.includes(t)) {
+        return true;
+    }
+    if (title && typeof title === "string" && DYNAMIC_NODES.includes(title)) {
+        return true;
+    }
+    return false;
+}
 
 function getDynamicInputSpec(node) {
     const t = node?.type || "";
@@ -35,7 +64,7 @@ function getDynamicInputSpec(node) {
 function isShaobkjRuntimeNode(node) {
     const t = node?.type;
     const title = node?.title;
-    if (t && DYNAMIC_NODES.includes(t)) {
+    if (t && (SHAOBKJ_NODE_TYPES.includes(t) || DYNAMIC_NODES.includes(t))) {
         return true;
     }
     if (title && typeof title === "string" && title.toLowerCase().includes("shaobkj")) {
@@ -142,7 +171,9 @@ function setupLinkWidget(node) {
         return false;
     }
 
-    const url = "https://yhmx.work/login?expired=true";
+    const defaultUrl = "https://yhmx.work/login?expired=true";
+    const urlValue = typeof widget.value === "string" ? widget.value.trim() : "";
+    const url = urlValue && (urlValue.startsWith("http://") || urlValue.startsWith("https://")) ? urlValue : defaultUrl;
     node.widgets.splice(index, 1);
     const newWidget = node.addWidget("button", "API申请地址", null, () => {
         window.open(url, "_blank");
@@ -186,6 +217,10 @@ function setupNodeStyle(node) {
         node.bgcolor = SHAOBKJ_NODE_BGCOLOR;
         changed = true;
     }
+    if (node.title_text_color !== SHAOBKJ_TITLE_TEXT_COLOR) {
+        node.title_text_color = SHAOBKJ_TITLE_TEXT_COLOR;
+        changed = true;
+    }
     return changed;
 }
 
@@ -213,7 +248,25 @@ app.registerExtension({
             }
             for (const node of nodes) {
                 if (isShaobkjRuntimeNode(node)) {
-                    manageInputs(node);
+                    setupNodeStyle(node);
+                    setupLinkWidget(node);
+                    setupLongSideWidget(node);
+                    if (shouldManageDynamicInputsByNode(node)) {
+                        manageInputs(node);
+                    } else if (node.inputs && Array.isArray(node.inputs) && node.inputs.length) {
+                        let changed = false;
+                        for (let i = node.inputs.length - 1; i >= 0; i--) {
+                            const n = node.inputs[i]?.name || "";
+                            if (n.startsWith("image_") || n.startsWith("video_")) {
+                                node.removeInput(i);
+                                changed = true;
+                            }
+                        }
+                        if (changed) {
+                            node.onResize?.(node.size);
+                            node.setDirtyCanvas(true, true);
+                        }
+                    }
                 }
             }
         };
@@ -223,12 +276,12 @@ app.registerExtension({
         return this.setup(app);
     },
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        const isShaobkjNode =
-            DYNAMIC_NODES.includes(nodeData?.name) ||
-            (nodeData?.category && nodeData.category.startsWith("🤖shaobkj-APIbox"));
-        if (isShaobkjNode) {
+        const isShaobkjCategory = nodeData?.category && nodeData.category.startsWith("🤖shaobkj-APIbox");
+        const needsDynamicInputs = shouldManageDynamicInputsByNodeData(nodeData);
+        if (isShaobkjCategory || needsDynamicInputs) {
             nodeType.prototype.color = SHAOBKJ_NODE_COLOR;
             nodeType.prototype.bgcolor = SHAOBKJ_NODE_BGCOLOR;
+            nodeType.prototype.title_text_color = SHAOBKJ_TITLE_TEXT_COLOR;
             
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
@@ -236,7 +289,9 @@ app.registerExtension({
                 
                 setTimeout(() => {
                     setupNodeStyle(this);
-                    manageInputs(this);
+                    setupLinkWidget(this);
+                    setupLongSideWidget(this);
+                    if (needsDynamicInputs) manageInputs(this);
                 }, 50);
                 
                 return r;
@@ -246,7 +301,7 @@ app.registerExtension({
             nodeType.prototype.onConnectionsChange = function (type, index, connected, link_info, slot) {
                 const r = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
                 
-                if (type === 1) {
+                if (needsDynamicInputs && type === 1) {
                     setTimeout(() => {
                         manageInputs(this);
                     }, 50);
@@ -259,9 +314,11 @@ app.registerExtension({
             nodeType.prototype.onConfigure = function() {
                 const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
                 
-                setTimeout(() => {
-                    manageInputs(this);
-                }, 50);
+                if (needsDynamicInputs) {
+                    setTimeout(() => {
+                        manageInputs(this);
+                    }, 50);
+                }
                 
                 return r;
             }
