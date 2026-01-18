@@ -348,23 +348,26 @@ class Shaobkj_APINode:
                 current_p = 70
                 fail_count = 0
                 done_statuses = {"SUCCEEDED", "SUCCESS", "COMPLETED", "FINISHED", "DONE"}
-                failed_statuses = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED"}
+                failed_statuses = {"FAILED", "FAIL", "ERROR", "FAILURE", "CANCELED", "CANCELLED"}
 
                 while True:
-                    if time.time() - start_time > poll_timeout_val:
+                    elapsed = time.time() - start_time
+                    remaining = poll_timeout_val - elapsed
+                    if remaining <= 0:
                         raise RuntimeError(f"图像生成超时 ({poll_timeout_val}秒)")
 
-                    time.sleep(5)
+                    time.sleep(min(5, max(0.0, remaining)))
                     current_p = min(95, current_p + 2)
                     pbar.update_absolute(current_p)
 
                     try:
+                        poll_req_timeout = 30 if int(等待时间) == 0 else max(1, min(30, int(remaining)))
                         poll_resp = session.get(
                             poll_url,
                             headers=headers,
                             params={"_t": int(time.time() * 1000)},
                             verify=False,
-                            timeout=30,
+                            timeout=poll_req_timeout,
                             proxies=proxies,
                         )
                         fail_count = 0

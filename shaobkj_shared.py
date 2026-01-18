@@ -1,5 +1,7 @@
 import os
 import json
+import re
+import shutil
 import numpy as np
 import torch
 from PIL import Image
@@ -81,10 +83,13 @@ def create_requests_session(use_system_proxy: bool):
 
 def build_submit_timeout(wait_seconds: int):
     w = int(wait_seconds)
-    # 如果用户设为0，给予极长的超时（24小时）以支持无限等待
-    # 如果用户设为非0，给予至少30秒的缓冲，但尊重用户的设置，不再强制延长到600秒
-    read_timeout = 86400 if w == 0 else max(30, w)
-    return (10, read_timeout)
+    if w == 0:
+        return (10, 86400)
+    if w < 0:
+        w = 1
+    connect_timeout = min(10, w)
+    read_timeout = max(1, w)
+    return (connect_timeout, read_timeout)
 
 
 def post_json_with_retry(
@@ -160,3 +165,105 @@ def auth_headers_for_same_origin(url: str, api_origin: str, headers: dict):
         return headers
     except Exception:
         return None
+
+
+def extract_task_id_and_video_url(resp):
+    resp_json = None
+    resp_text = None
+    try:
+        resp_json = resp.json()
+    except Exception:
+        try:
+            resp_text = resp.text
+        except Exception:
+            resp_text = None
+
+    task_id = None
+    video_url = None
+
+    def maybe_set_from_dict(d):
+        nonlocal task_id, video_url
+        if not isinstance(d, dict):
+            return
+        if task_id is None:
+            task_id = d.get("task_id") or d.get("id")
+        if video_url is None:
+            u = d.get("video_url") or d.get("url")
+            if isinstance(u, str) and (u.startswith("http://") or u.startswith("https://")):
+                video_url = u
+        data = d.get("data")
+        if isinstance(data, dict):
+            if task_id is None:
+                task_id = data.get("task_id") or data.get("id")
+            if video_url is None:
+                u = data.get("video_url") or data.get("url")
+                if isinstance(u, str) and (u.startswith("http://") or u.startswith("https://")):
+                    video_url = u
+        result = d.get("result")
+        if isinstance(result, dict):
+            if task_id is None:
+                task_id = result.get("task_id") or result.get("id")
+            if video_url is None:
+                u = result.get("video_url") or result.get("url")
+                if isinstance(u, str) and (u.startswith("http://") or u.startswith("https://")):
+                    video_url = u
+        choices = d.get("choices")
+        if isinstance(choices, list) and choices:
+            msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(content, str) and content:
+                return content
+        return None
+
+    content_text = None
+    if isinstance(resp_json, dict):
+        content_text = maybe_set_from_dict(resp_json)
+        if resp_text is None and content_text:
+            resp_text = content_text
+
+    if not task_id:
+        headers = getattr(resp, "headers", {}) or {}
+        task_id = headers.get("X-Task-Id") or headers.get("Task-Id") or headers.get("task_id") or headers.get("task-id")
+        if not task_id:
+            location = headers.get("Location") or headers.get("location")
+            if isinstance(location, str) and location:
+                m = re.search(r"/([^/]+)/?$", location.strip())
+                if m:
+                    task_id = m.group(1)
+
+    if video_url is None and isinstance(resp_text, str) and resp_text.strip():
+        m = re.search(r"(https?://[^\s\)\]]+)", resp_text)
+        if m:
+            u = m.group(1).rstrip(".,;!?")
+            if u.startswith("http://") or u.startswith("https://"):
+                video_url = u
+
+    return task_id, video_url, resp_json, resp_text
+
+
+class SimpleVideoAdapter:
+    def __init__(self, video_path_or_url: str):
+        v = str(video_path_or_url or "")
+        self.is_url = v.startswith("http://") or v.startswith("https://")
+        self.video_url = v if self.is_url else None
+        self.video_path = v if (not self.is_url and v) else None
+
+    def get_dimensions(self):
+        return 1280, 720
+
+    def save_to(self, output_path, format="auto", codec="auto", metadata=None):
+        try:
+            if self.is_url and self.video_url:
+                resp = requests.get(self.video_url, stream=True, timeout=120)
+                resp.raise_for_status()
+                with open(output_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                return True
+            if self.video_path and os.path.exists(self.video_path):
+                shutil.copyfile(self.video_path, output_path)
+                return True
+            return False
+        except Exception:
+            return False

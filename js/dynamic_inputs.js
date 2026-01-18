@@ -15,13 +15,22 @@ const DYNAMIC_NODES = [
     "Shaobkj -Sora视频",
     "Shaobkj -Veo视频",
 ];
-const INPUT_PREFIX = "image_";
 const MIN_INPUTS = 2;
 let started = false;
 const LONG_SIDE_WIDGET_NAME = "长边设置";
 const LONG_SIDE_WIDGET_LABEL = "输入图像-长边设置";
 const SHAOBKJ_NODE_COLOR = "#6C88B8";
 const SHAOBKJ_NODE_BGCOLOR = "#1E2633";
+
+function getDynamicInputSpec(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    const k = `${t} ${title}`.toLowerCase();
+    if (k.includes("video_edit") || k.includes("视频编辑")) {
+        return { prefix: "video_", slotType: "VIDEO" };
+    }
+    return { prefix: "image_", slotType: "IMAGE" };
+}
 
 function isShaobkjRuntimeNode(node) {
     const t = node?.type;
@@ -42,22 +51,24 @@ function manageInputs(node) {
 
     let changed = false;
 
+    const { prefix, slotType } = getDynamicInputSpec(node);
+
     const imageInputs = [];
     for (let i = 0; i < node.inputs.length; i++) {
-        if (node.inputs[i].name && node.inputs[i].name.startsWith(INPUT_PREFIX)) {
+        if (node.inputs[i].name && node.inputs[i].name.startsWith(prefix)) {
             imageInputs.push(node.inputs[i]);
         }
     }
 
     imageInputs.sort((a, b) => {
-        const idxA = parseInt(a.name.replace(INPUT_PREFIX, ""));
-        const idxB = parseInt(b.name.replace(INPUT_PREFIX, ""));
+        const idxA = parseInt(a.name.replace(prefix, ""));
+        const idxB = parseInt(b.name.replace(prefix, ""));
         return idxA - idxB;
     });
 
     let highestConnectedIndex = 0;
     for (const input of imageInputs) {
-        const idx = parseInt(input.name.replace(INPUT_PREFIX, ""));
+        const idx = parseInt(input.name.replace(prefix, ""));
         if (input.link !== null && input.link !== undefined && input.link !== -1) {
             if (idx > highestConnectedIndex) {
                 highestConnectedIndex = idx;
@@ -68,32 +79,32 @@ function manageInputs(node) {
     let targetCount = Math.max(highestConnectedIndex + 1, MIN_INPUTS);
     
     for (let i = 1; i <= targetCount; i++) {
-        const name = `${INPUT_PREFIX}${i}`;
+        const name = `${prefix}${i}`;
         const existingIndex = node.findInputSlot ? node.findInputSlot(name) : -1;
         
         if (existingIndex === -1) {
-            node.addInput(name, "IMAGE");
+            node.addInput(name, slotType);
             changed = true;
         }
     }
     
     let currentMaxIndex = 0;
     if (imageInputs.length > 0) {
-        const currentInputs = node.inputs.filter(inp => inp.name.startsWith(INPUT_PREFIX));
+        const currentInputs = node.inputs.filter(inp => inp.name.startsWith(prefix));
         currentInputs.sort((a, b) => {
-             const idxA = parseInt(a.name.replace(INPUT_PREFIX, ""));
-             const idxB = parseInt(b.name.replace(INPUT_PREFIX, ""));
+             const idxA = parseInt(a.name.replace(prefix, ""));
+             const idxB = parseInt(b.name.replace(prefix, ""));
              return idxA - idxB;
         });
         
         if (currentInputs.length > 0) {
-            currentMaxIndex = parseInt(currentInputs[currentInputs.length - 1].name.replace(INPUT_PREFIX, ""));
+            currentMaxIndex = parseInt(currentInputs[currentInputs.length - 1].name.replace(prefix, ""));
         }
     }
 
     if (currentMaxIndex > targetCount) {
         for (let i = currentMaxIndex; i > targetCount; i--) {
-            const name = `${INPUT_PREFIX}${i}`;
+            const name = `${prefix}${i}`;
             const inputIndex = node.findInputSlot ? node.findInputSlot(name) : -1;
             
             if (inputIndex !== -1) {
