@@ -214,11 +214,14 @@ function overrideDrawTitle(node) {
     node.onDrawTitle = function(ctx) {
         const originalFillText = ctx.fillText;
         ctx.fillText = function(text, x, y, maxWidth) {
-            // Force red color for any text drawn in title bar
-            const old = ctx.fillStyle;
-            ctx.fillStyle = SHAOBKJ_TITLE_TEXT_COLOR;
-            originalFillText.apply(ctx, arguments);
-            ctx.fillStyle = old;
+            if (text === node.title) {
+                const old = ctx.fillStyle;
+                ctx.fillStyle = SHAOBKJ_TITLE_TEXT_COLOR;
+                originalFillText.apply(ctx, arguments);
+                ctx.fillStyle = old;
+            } else {
+                originalFillText.apply(ctx, arguments);
+            }
         };
         try {
              if (original) {
@@ -275,7 +278,6 @@ app.registerExtension({
 
         started = true;
         const tick = () => {
-            requestAnimationFrame(tick);
             const graph = app?.graph;
             const nodes = graph?._nodes;
             if (!nodes || !Array.isArray(nodes)) {
