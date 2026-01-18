@@ -206,40 +206,6 @@ function setupLongSideWidget(node) {
     return false;
 }
 
-function overrideDrawTitle(node) {
-    if (node.__shaobkj_hooked_drawTitle) return false;
-    
-    const original = node.onDrawTitle;
-    
-    node.onDrawTitle = function(ctx) {
-        const originalFillText = ctx.fillText;
-        ctx.fillText = function(text, x, y, maxWidth) {
-            if (text === node.title) {
-                const old = ctx.fillStyle;
-                ctx.fillStyle = SHAOBKJ_TITLE_TEXT_COLOR;
-                originalFillText.apply(ctx, arguments);
-                ctx.fillStyle = old;
-            } else {
-                originalFillText.apply(ctx, arguments);
-            }
-        };
-        try {
-             if (original) {
-                original.apply(this, arguments);
-             } else {
-                LGraphNode.prototype.onDrawTitle?.apply(this, arguments);
-             }
-        } catch(e) {
-            console.error("[Shaobkj] Error drawing title", e);
-        } finally {
-            ctx.fillText = originalFillText;
-        }
-    };
-    
-    node.__shaobkj_hooked_drawTitle = true;
-    return true;
-}
-
 function setupNodeStyle(node) {
     if (!isShaobkjRuntimeNode(node)) return;
     let changed = false;
@@ -253,9 +219,6 @@ function setupNodeStyle(node) {
     }
     if (node.title_text_color !== SHAOBKJ_TITLE_TEXT_COLOR) {
         node.title_text_color = SHAOBKJ_TITLE_TEXT_COLOR;
-        changed = true;
-    }
-    if (overrideDrawTitle(node)) {
         changed = true;
     }
     return changed;
