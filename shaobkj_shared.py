@@ -7,6 +7,8 @@ import torch
 from PIL import Image
 import time
 import requests
+import io
+import base64
 from urllib.parse import urlparse
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
@@ -90,15 +92,6 @@ def build_submit_timeout(wait_seconds: int):
     connect_timeout = min(10, w)
     # Ensure read_timeout uses the user-provided wait_seconds (w)
     # The read_timeout should be at least as long as the user wants to wait.
-    # Previously it might have been short if w was small but logic was correct: max(1, w)
-    # However, if w=180, read_timeout=180.
-    # If the server takes 244s, it should timeout at 180s.
-    # If it didn't timeout, maybe requests session settings or something else is interfering?
-    # Or maybe the server sends keep-alive packets or partial data?
-    # Requests read timeout is for "time between bytes".
-    # If the server streams data slowly, it might not trigger read timeout if gaps < timeout.
-    # But for a simple POST, it usually waits for the whole response.
-    # Let's ensure it's strictly set.
     read_timeout = max(1, w)
     return (connect_timeout, read_timeout)
 
@@ -315,3 +308,116 @@ class SimpleVideoAdapter:
             return False
         except Exception:
             return False
+
+def extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60):
+    """
+    Extracts a PIL Image from an API response JSON.
+    Supports Gemini (inlineData), OpenAI (b64_json, url), and markdown/raw URLs.
+    Returns: PIL.Image object or None
+    """
+    if not isinstance(res_json, dict):
+        return None
+
+    # 1. Gemini / Google format
+    if "candidates" in res_json and isinstance(res_json["candidates"], list) and res_json["candidates"]:
+        for cand in res_json["candidates"]:
+            content = cand.get("content") if isinstance(cand, dict) else None
+            parts = content.get("parts") if isinstance(content, dict) else None
+            if not isinstance(parts, list):
+                continue
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                inline = part.get("inlineData") or part.get("inline_data")
+                if isinstance(inline, dict) and inline.get("data"):
+                    try:
+                        image_data = base64.b64decode(inline["data"])
+                        image = Image.open(io.BytesIO(image_data))
+                        if image.mode != "RGB":
+                            image = image.convert("RGB")
+                        return image
+                    except Exception:
+                        pass
+
+    # 2. OpenAI / Generic format (data list)
+    if "data" in res_json and isinstance(res_json["data"], list) and res_json["data"]:
+        data_item = res_json["data"][0]
+        if isinstance(data_item, dict):
+            # 2a. b64_json
+            if "b64_json" in data_item:
+                try:
+                    image_data = base64.b64decode(data_item["b64_json"])
+                    image = Image.open(io.BytesIO(image_data))
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    return image
+                except Exception:
+                    pass
+            # 2b. url
+            if "url" in data_item:
+                try:
+                    image_url = data_item["url"]
+                    download_timeout = timeout_val
+                    img_headers = auth_headers_for_same_origin(str(image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
+                    img_res = session.get(image_url, verify=False, timeout=download_timeout, proxies=proxies, headers=img_headers)
+                    img_res.raise_for_status()
+                    image = Image.open(io.BytesIO(img_res.content))
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    return image
+                except Exception:
+                    pass
+
+    # 3. OpenAI Chat Completion format (choices) -> Extract from text content
+    if "choices" in res_json and isinstance(res_json["choices"], list) and len(res_json["choices"]) > 0:
+        content_text = res_json["choices"][0].get("message", {}).get("content", "")
+        if content_text:
+            # 3a. Extract URLs (Markdown or Raw)
+            urls = re.findall(r"!\[.*?\]\((.*?)\)", content_text)
+            if not urls:
+                urls = re.findall(r"(https?://[^\s)]+)", content_text)
+            
+            valid_image_url = None
+            for u in urls:
+                if str(u).lower().startswith("data:"):
+                    continue
+                valid_image_url = u
+                break
+            
+            if valid_image_url:
+                try:
+                    download_timeout = timeout_val
+                    img_headers = auth_headers_for_same_origin(str(valid_image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
+                    img_res = session.get(valid_image_url, verify=False, timeout=download_timeout, proxies=proxies, headers=img_headers)
+                    img_res.raise_for_status()
+                    image = Image.open(io.BytesIO(img_res.content))
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    return image
+                except Exception:
+                    pass
+
+            # 3b. Extract Base64 from text
+            try:
+                b64_pattern = r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)"
+                match = re.search(b64_pattern, content_text)
+                b64_clean = ""
+                if match:
+                    b64_clean = match.group(1)
+                else:
+                    # Clean up markdown/data URI prefix manually
+                    temp_clean = re.sub(r"^!\[.*?\]\(", "", content_text.strip())
+                    temp_clean = re.sub(r"\)$", "", temp_clean)
+                    temp_clean = re.sub(r"^data:image/.+;base64,", "", temp_clean)
+                    b64_clean = re.sub(r"\s+", "", temp_clean)
+                
+                if len(b64_clean) > 100:
+                    image_data = base64.b64decode(b64_clean)
+                    image = Image.open(io.BytesIO(image_data))
+                    if image.mode != "RGB":
+                        image = image.convert("RGB")
+                    return image
+            except Exception:
+                pass
+
+    return None

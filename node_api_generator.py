@@ -23,6 +23,7 @@ from .shaobkj_shared import (
     get_config_value,
     pil_to_tensor,
     post_json_with_retry,
+    extract_image_from_json,
 )
 from comfy.utils import ProgressBar
 
@@ -183,7 +184,9 @@ class Shaobkj_APINode:
 
         url = f"{base_origin}/v1beta/models/{model}:generateContent"
 
-        parts = [{"text": prompt}]
+        # Force image generation by appending instruction
+        final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
+        parts = [{"text": final_prompt}]
 
         # Process input images if any
         image_inputs = []
@@ -259,96 +262,6 @@ class Shaobkj_APINode:
                     pass
             return "\n".join(lines)
 
-        def try_extract_image_from_json(res_json):
-            if isinstance(res_json, dict) and "candidates" in res_json and isinstance(res_json["candidates"], list) and res_json["candidates"]:
-                for cand in res_json["candidates"]:
-                    content = cand.get("content") if isinstance(cand, dict) else None
-                    parts = content.get("parts") if isinstance(content, dict) else None
-                    if not isinstance(parts, list):
-                        continue
-                    for part in parts:
-                        if not isinstance(part, dict):
-                            continue
-                        inline = part.get("inlineData") or part.get("inline_data")
-                        if isinstance(inline, dict) and inline.get("data"):
-                            image_data = base64.b64decode(inline["data"])
-                            image = Image.open(io.BytesIO(image_data))
-                            if image.mode != "RGB":
-                                image = image.convert("RGB")
-                            return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
-
-            if isinstance(res_json, dict) and "data" in res_json and isinstance(res_json["data"], list) and res_json["data"]:
-                data_item = res_json["data"][0]
-                if isinstance(data_item, dict) and "b64_json" in data_item:
-                    image_data = base64.b64decode(data_item["b64_json"])
-                    image = Image.open(io.BytesIO(image_data))
-                    if image.mode != "RGB":
-                        image = image.convert("RGB")
-                    return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
-                if isinstance(data_item, dict) and "url" in data_item:
-                    image_url = data_item["url"]
-                    download_timeout = 60 if timeout_val is None else timeout_val
-                    img_headers = auth_headers_for_same_origin(str(image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
-                    img_res = session.get(image_url, verify=False, timeout=download_timeout, proxies=proxies, headers=img_headers)
-                    img_res.raise_for_status()
-                    image = Image.open(io.BytesIO(img_res.content))
-                    if image.mode != "RGB":
-                        image = image.convert("RGB")
-                    return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
-
-            if isinstance(res_json, dict) and "choices" in res_json and isinstance(res_json["choices"], list) and len(res_json["choices"]) > 0:
-                content_text = res_json["choices"][0].get("message", {}).get("content", "")
-                if content_text is None:
-                    content_text = ""
-
-                urls = re.findall(r"!\[.*?\]\((.*?)\)", content_text)
-                if not urls:
-                    urls = re.findall(r"(https?://[^\s)]+)", content_text)
-
-                valid_image_url = None
-                for u in urls:
-                    if str(u).lower().startswith("data:"):
-                        continue
-                    valid_image_url = u
-                    break
-
-                if valid_image_url:
-                    try:
-                        download_timeout = 60 if timeout_val is None else timeout_val
-                        img_headers = auth_headers_for_same_origin(str(valid_image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
-                        img_res = session.get(valid_image_url, verify=False, timeout=download_timeout, proxies=proxies, headers=img_headers)
-                        img_res.raise_for_status()
-                        image = Image.open(io.BytesIO(img_res.content))
-                        if image.mode != "RGB":
-                            image = image.convert("RGB")
-                        return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
-                    except Exception:
-                        pass
-
-                try:
-                    b64_pattern = r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)"
-                    match = re.search(b64_pattern, content_text)
-
-                    b64_clean = ""
-                    if match:
-                        b64_clean = match.group(1)
-                    else:
-                        temp_clean = re.sub(r"^!\[.*?\]\(", "", content_text.strip())
-                        temp_clean = re.sub(r"\)$", "", temp_clean)
-                        temp_clean = re.sub(r"^data:image/.+;base64,", "", temp_clean)
-                        b64_clean = re.sub(r"\s+", "", temp_clean)
-
-                    if len(b64_clean) > 100:
-                        image_data = base64.b64decode(b64_clean)
-                        image = Image.open(io.BytesIO(image_data))
-                        if image.mode != "RGB":
-                            image = image.convert("RGB")
-                        return pil_to_tensor(image), format_basic_api_response("成功", pil_image=image), image
-                except Exception:
-                    pass
-
-            return None
-
         disable_insecure_request_warnings()
         session, proxies = create_requests_session(bool(使用系统代理))
         submit_timeout = build_submit_timeout(int(等待时间))
@@ -411,10 +324,9 @@ class Shaobkj_APINode:
             res_json = response.json()
             pbar.update_absolute(70)
 
-            extracted = try_extract_image_from_json(res_json)
-            if extracted:
-                img_tensor, raw_text, pil_image = extracted
-                return return_result(img_tensor, raw_text, pil_image=pil_image)
+            extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+            if extracted_img:
+                return return_result(pil_to_tensor(extracted_img), format_basic_api_response("成功", pil_image=extracted_img), pil_image=extracted_img)
 
             if isinstance(res_json, dict):
                 task_id = res_json.get("id") or res_json.get("task_id")
@@ -461,10 +373,9 @@ class Shaobkj_APINode:
                         continue
 
                     poll_json = poll_resp.json()
-                    extracted = try_extract_image_from_json(poll_json)
-                    if extracted:
-                        img_tensor, raw_text, pil_image = extracted
-                        return return_result(img_tensor, raw_text, pil_image=pil_image)
+                    extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+                    if extracted_img:
+                        return return_result(pil_to_tensor(extracted_img), format_basic_api_response("成功", pil_image=extracted_img), pil_image=extracted_img)
 
                     status = None
                     if isinstance(poll_json, dict):
@@ -548,6 +459,31 @@ class Shaobkj_APINode_Batch:
         base_headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         url = f"{base_origin}/v1beta/models/{model}:generateContent"
         submit_timeout = build_submit_timeout(int(等待时间))
+        session, proxies = create_requests_session(bool(使用系统代理))
+
+        # ---------------------------------------------------------
+        # Progress Bar Simulator Logic (Batch)
+        # ---------------------------------------------------------
+        pbar = ProgressBar(100)
+        pbar.update_absolute(0)
+        progress_state = {"stop": False}
+
+        def progress_simulator():
+            current = 0.0
+            while not progress_state["stop"] and current < 95.0:
+                time.sleep(0.1)
+                if current < 30: step = 2.0
+                elif current < 60: step = 0.5
+                elif current < 80: step = 0.2
+                else: step = 0.05
+                current += step
+                if current > 95: current = 95
+                pbar.update_absolute(int(current))
+
+        import threading
+        t_progress = threading.Thread(target=progress_simulator)
+        t_progress.daemon = True
+        t_progress.start()
 
         def format_basic_api_response(status, safe_seed, pil_image=None, task_id=None):
             lines = [
@@ -566,89 +502,6 @@ class Shaobkj_APINode_Batch:
                 except Exception:
                     pass
             return "\n".join(lines)
-
-        def try_extract_image_from_json(res_json, session, proxies):
-            if isinstance(res_json, dict) and "candidates" in res_json and isinstance(res_json["candidates"], list) and res_json["candidates"]:
-                for cand in res_json["candidates"]:
-                    content = cand.get("content") if isinstance(cand, dict) else None
-                    parts = content.get("parts") if isinstance(content, dict) else None
-                    if not isinstance(parts, list):
-                        continue
-                    for part in parts:
-                        if not isinstance(part, dict):
-                            continue
-                        inline = part.get("inlineData") or part.get("inline_data")
-                        if isinstance(inline, dict) and inline.get("data"):
-                            image_data = base64.b64decode(inline["data"])
-                            image = Image.open(io.BytesIO(image_data))
-                            if image.mode != "RGB":
-                                image = image.convert("RGB")
-                            return pil_to_tensor(image), image
-
-            if isinstance(res_json, dict) and "data" in res_json and isinstance(res_json["data"], list) and res_json["data"]:
-                data_item = res_json["data"][0]
-                if isinstance(data_item, dict) and "b64_json" in data_item:
-                    image_data = base64.b64decode(data_item["b64_json"])
-                    image = Image.open(io.BytesIO(image_data))
-                    if image.mode != "RGB":
-                        image = image.convert("RGB")
-                    return pil_to_tensor(image), image
-                if isinstance(data_item, dict) and "url" in data_item:
-                    image_url = data_item["url"]
-                    download_timeout = 60 if timeout_val is None else timeout_val
-                    img_headers = auth_headers_for_same_origin(str(image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
-                    img_res = session.get(image_url, verify=False, timeout=download_timeout, proxies=proxies, headers=img_headers)
-                    img_res.raise_for_status()
-                    image = Image.open(io.BytesIO(img_res.content))
-                    if image.mode != "RGB":
-                        image = image.convert("RGB")
-                    return pil_to_tensor(image), image
-
-            if isinstance(res_json, dict) and "choices" in res_json and isinstance(res_json["choices"], list) and len(res_json["choices"]) > 0:
-                content_text = res_json["choices"][0].get("message", {}).get("content", "")
-                if content_text is None:
-                    content_text = ""
-                urls = re.findall(r"!\[.*?\]\((.*?)\)", content_text)
-                if not urls:
-                    urls = re.findall(r"(https?://[^\s)]+)", content_text)
-                valid_image_url = None
-                for u in urls:
-                    if str(u).lower().startswith("data:"):
-                        continue
-                    valid_image_url = u
-                    break
-                if valid_image_url:
-                    try:
-                        download_timeout = 60 if timeout_val is None else timeout_val
-                        img_headers = auth_headers_for_same_origin(str(valid_image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
-                        img_res = session.get(valid_image_url, verify=False, timeout=download_timeout, proxies=proxies, headers=img_headers)
-                        img_res.raise_for_status()
-                        image = Image.open(io.BytesIO(img_res.content))
-                        if image.mode != "RGB":
-                            image = image.convert("RGB")
-                        return pil_to_tensor(image), image
-                    except Exception:
-                        pass
-                try:
-                    b64_pattern = r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)"
-                    match = re.search(b64_pattern, content_text)
-                    b64_clean = ""
-                    if match:
-                        b64_clean = match.group(1)
-                    else:
-                        temp_clean = re.sub(r"^!\[.*?\]\(", "", content_text.strip())
-                        temp_clean = re.sub(r"\)$", "", temp_clean)
-                        temp_clean = re.sub(r"^data:image/.+;base64,", "", temp_clean)
-                        b64_clean = re.sub(r"\s+", "", temp_clean)
-                    if len(b64_clean) > 100:
-                        image_data = base64.b64decode(b64_clean)
-                        image = Image.open(io.BytesIO(image_data))
-                        if image.mode != "RGB":
-                            image = image.convert("RGB")
-                        return pil_to_tensor(image), image
-                except Exception:
-                    pass
-            return None
 
         def normalize_seed(seed_value):
             safe_seed = int(seed_value)
@@ -693,8 +546,10 @@ class Shaobkj_APINode_Batch:
 
         def generate_one(index, prompt):
             local_seed = normalize_seed(int(seed) + int(index))
-            session, proxies = create_requests_session(bool(使用系统代理))
-            parts = [{"text": prompt}]
+            # Session and proxies reused from outer scope
+            # Force image generation by appending instruction
+            final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
+            parts = [{"text": final_prompt}]
             payload = {"contents": [{"role": "user", "parts": parts}]}
             payload["generationConfig"] = {"temperature": 0.7, "seed": local_seed, "responseModalities": ["TEXT", "IMAGE"]}
             payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
@@ -714,10 +569,9 @@ class Shaobkj_APINode_Batch:
             response.raise_for_status()
             res_json = response.json()
 
-            extracted = try_extract_image_from_json(res_json, session, proxies)
-            if extracted:
-                img_tensor, pil_image = extracted
-                return (img_tensor, format_basic_api_response("成功", local_seed, pil_image=pil_image, task_id=task_id))
+            extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+            if extracted_img:
+                return (pil_to_tensor(extracted_img), format_basic_api_response("成功", local_seed, pil_image=extracted_img, task_id=task_id))
 
             if isinstance(res_json, dict):
                 task_id = res_json.get("id") or res_json.get("task_id")
@@ -760,10 +614,10 @@ class Shaobkj_APINode_Batch:
                 if poll_resp.status_code != 200:
                     continue
                 poll_json = poll_resp.json()
-                extracted = try_extract_image_from_json(poll_json, session, proxies)
-                if extracted:
-                    img_tensor, pil_image = extracted
-                    return (img_tensor, format_basic_api_response("成功", local_seed, pil_image=pil_image, task_id=task_id))
+                extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+                if extracted_img:
+                    return (pil_to_tensor(extracted_img), format_basic_api_response("成功", local_seed, pil_image=extracted_img, task_id=task_id))
+                
                 status = None
                 if isinstance(poll_json, dict):
                     status = poll_json.get("status") or poll_json.get("task_status")
@@ -788,15 +642,21 @@ class Shaobkj_APINode_Batch:
             max_workers = min(10, max(1, len(prompts)))
         else:
             max_workers = min(10, max(1, min(concurrency_limit, len(prompts))))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {executor.submit(generate_one, idx, p): (idx, p) for idx, p in enumerate(prompts)}
-            for fut in concurrent.futures.as_completed(future_map):
-                idx, p = future_map[fut]
-                try:
-                    img_tensor, resp_text = fut.result()
-                    results.append((idx, img_tensor, resp_text))
-                except Exception as e:
-                    errors.append((idx, sanitize_text(str(e))))
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_map = {executor.submit(generate_one, idx, p): (idx, p) for idx, p in enumerate(prompts)}
+                for fut in concurrent.futures.as_completed(future_map):
+                    idx, p = future_map[fut]
+                    try:
+                        img_tensor, resp_text = fut.result()
+                        results.append((idx, img_tensor, resp_text))
+                    except Exception as e:
+                        errors.append((idx, sanitize_text(str(e))))
+        finally:
+            progress_state["stop"] = True
+            if t_progress.is_alive():
+                t_progress.join(timeout=1.0)
+            pbar.update_absolute(100)
 
         results.sort(key=lambda x: x[0])
         ok_tensors = [r[1] for r in results if isinstance(r[1], torch.Tensor)]
