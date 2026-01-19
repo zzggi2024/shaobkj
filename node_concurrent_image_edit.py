@@ -244,7 +244,17 @@ def run_concurrent_task(data):
             raise RuntimeError("No image data found in response")
 
     except Exception as e:
-        err_msg = f"Error: {str(e)}"
+        err_msg = str(e)
+        # Simplify common API errors
+        if "401" in err_msg or "Unauthorized" in err_msg or "invalid_api_key" in err_msg:
+             err_msg = "❌ 错误：API Key 无效或未授权 (401 Unauthorized)。请检查您的 API Key 是否正确。"
+        elif "404" in err_msg or "Not Found" in err_msg:
+             err_msg = "❌ 错误：API 地址或模型未找到 (404 Not Found)。请检查 API 地址和模型名称。"
+        elif "429" in err_msg or "Too Many Requests" in err_msg or "quota" in err_msg.lower():
+             err_msg = "❌ 错误：API 配额耗尽或请求过于频繁 (429 Too Many Requests)。"
+        elif "500" in err_msg or "Internal Server Error" in err_msg:
+             err_msg = "❌ 错误：API 服务端内部错误 (500 Internal Server Error)。"
+             
         print(f"[ComfyUI-shaobkj] {task_id_local}: {err_msg}")
         traceback.print_exc()
         PromptServer.instance.send_sync("shaobkj.concurrent.error", {"task_id": task_id_local, "error": err_msg})
@@ -328,6 +338,28 @@ class Shaobkj_ConcurrentImageEdit:
         This function captures inputs (including connected tensors), prepares data, 
         and starts the background thread.
         """
+        
+        # 0. Pre-check (Main Thread) to prevent multiple popups
+        if not API密钥 or str(API密钥).strip() == "":
+            raise ValueError("❌ 错误：API Key 不能为空 (API Key is required)")
+        
+        # Check for non-ascii characters in API Key
+        try:
+            str(API密钥).encode('ascii')
+        except UnicodeEncodeError:
+            raise ValueError("❌ 错误：API Key 包含非法字符（如中文）。请检查是否复制了多余内容。")
+
+        if not API地址 or str(API地址).strip() == "":
+            raise ValueError("❌ 错误：API 地址不能为空 (API URL is required)")
+
+        # Check for non-ascii in API URL
+        try:
+            str(API地址).encode('ascii')
+        except UnicodeEncodeError:
+             raise ValueError("❌ 错误：API 地址包含非法字符（如中文）。")
+             
+        if not str(API地址).startswith("http"):
+             raise ValueError("❌ 错误：API 地址必须以 http:// 或 https:// 开头")
         
         # 1. Prepare Data
         data = {
