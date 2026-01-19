@@ -57,7 +57,7 @@ class Shaobkj_APINode:
                 "使用系统代理": ("BOOLEAN", {"default": False}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (
-                    ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
+                    ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
                     {"default": "原图1比例"},
                 ),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
@@ -72,13 +72,50 @@ class Shaobkj_APINode:
     FUNCTION = "generate_image"
     CATEGORY = "🤖shaobkj-APIbox"
 
-    def get_target_size(self, resolution, aspect_ratio):
+    def snap_to_aspect_ratio(self, ratio):
+        """
+        Snaps a float ratio (width/height) to the nearest standard aspect ratio string.
+        """
+        # Standard ratios map: float_value -> string_representation
+        standards = {
+            1.0: "1:1",
+            4/3: "4:3",
+            3/4: "3:4",
+            3/2: "3:2",
+            2/3: "2:3",
+            16/9: "16:9",
+            9/16: "9:16",
+            21/9: "21:9",
+            9/21: "9:21"
+        }
+        
+        # Find closest
+        closest_dist = float('inf')
+        closest_str = "1:1"
+        
+        for r_val, r_str in standards.items():
+            dist = abs(ratio - r_val)
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_str = r_str
+                
+        return closest_str
+
+    def get_target_size(self, resolution, aspect_ratio, first_image_ratio=None):
         target_map = {"1k": 1024, "2k": 2048, "4k": 4096}
         target = target_map.get(str(resolution).lower(), 1024)
 
-        ar = str(aspect_ratio or "Free")
-        if ar == "Free":
-            return target, target
+        ar = str(aspect_ratio)
+        
+        # Handle "原图1比例" (Use first image ratio if available)
+        if ar == "原图1比例" and first_image_ratio is not None:
+             # Snap the actual float ratio to nearest standard string
+             snapped_ar_str = self.snap_to_aspect_ratio(first_image_ratio)
+             ar = snapped_ar_str # e.g., "16:9"
+
+        if ar == "原图1比例" or ar == "Free": 
+             return target, target
+             
         if ":" in ar:
             try:
                 a, b = ar.split(":", 1)
@@ -119,7 +156,7 @@ class Shaobkj_APINode:
         img_resized = img.resize((new_width, new_height), Image.LANCZOS)
         
         buffered = io.BytesIO()
-        img_resized.save(buffered, format="JPEG", quality=95)
+        img_resized.save(buffered, format="JPEG", quality=85)
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         
         return img_str, aspect_ratio
@@ -161,6 +198,8 @@ class Shaobkj_APINode:
         
         for idx, (name, tensor) in enumerate(image_inputs):
             b64_str, ratio = self.resize_and_encode_image(tensor, long_side_limit)
+            if idx == 0:
+                first_image_ratio = ratio
             if b64_str:
                 parts.append({
                     "inline_data": {
@@ -168,8 +207,6 @@ class Shaobkj_APINode:
                         "data": b64_str
                     }
                 })
-                if idx == 0:
-                    first_image_ratio = ratio
 
         payload = {"contents": [{"role": "user", "parts": parts}]}
         safe_seed = int(seed_value)
@@ -181,28 +218,16 @@ class Shaobkj_APINode:
         payload["generationConfig"] = {"temperature": temperature, "seed": safe_seed, "responseModalities": ["TEXT", "IMAGE"]}
         payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
         
+        api_aspect_ratio = None
         if aspect_ratio == "原图1比例":
             if first_image_ratio is not None:
-                # Approximate aspect ratio to nearest standard string if needed, 
-                # or Gemini might support explicit ratio? 
-                # Gemini API usually expects standard ratios or "1:1" etc.
-                # If "Free" or unknown, we might omit aspectRatio or try to format it.
-                # For now, let's format it as "W:H" string if possible, or just skip if Gemini is strict.
-                # Actually Gemini 3 Pro might be strict. Let's try to find closest standard or just use string.
-                # Assuming user wants to keep aspect ratio of uploaded image.
-                # If API strictly requires enum, we might need mapping.
-                # But for now, let's convert float ratio to string "W:H"
-                w_r = 100
-                h_r = int(100 / first_image_ratio)
-                # payload["generationConfig"]["imageConfig"]["aspectRatio"] = f"{w_r}:{h_r}"
-                # If Gemini API fails with custom ratio, we might need to remove this or map to closest.
-                # Safe bet: Don't send aspectRatio if it's "Free" or custom, let model decide or default.
-                # If user selected "原图1比例", we ideally want to enforce it.
-                # Let's try sending it as string if API supports it, otherwise log warning.
-                # Actually, standard behavior for "Free" is usually not sending aspectRatio.
-                pass 
+                # Snap ratio string for API param
+                api_aspect_ratio = self.snap_to_aspect_ratio(first_image_ratio)
         elif aspect_ratio and aspect_ratio != "Free":
-            payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(aspect_ratio)
+            api_aspect_ratio = str(aspect_ratio)
+
+        if api_aspect_ratio:
+            payload["generationConfig"]["imageConfig"]["aspectRatio"] = api_aspect_ratio
 
         print(f"[ComfyUI-shaobkj] Sending request to {url} with model {model}...")
         pbar = ProgressBar(100)
@@ -328,6 +353,36 @@ class Shaobkj_APINode:
         session, proxies = create_requests_session(bool(使用系统代理))
         submit_timeout = build_submit_timeout(int(等待时间))
 
+        # ---------------------------------------------------------
+        # Progress Bar Simulator Logic
+        # ---------------------------------------------------------
+        progress_state = {"stop": False}
+
+        def progress_simulator():
+            current = 0.0
+            while not progress_state["stop"] and current < 95.0:
+                time.sleep(0.1) # Update frequently for smoothness
+                
+                # Simulation curve: Fast start -> Slow down -> Crawl
+                if current < 30: 
+                    step = 2.0  # 0-30%: Very fast (1.5s)
+                elif current < 60: 
+                    step = 0.5  # 30-60%: Moderate (6s)
+                elif current < 80: 
+                    step = 0.2  # 60-80%: Slow (10s)
+                else: 
+                    step = 0.05 # 80-95%: Crawling (indefinite)
+                
+                current += step
+                if current > 95: current = 95
+                pbar.update_absolute(int(current))
+
+        # Start progress thread
+        import threading
+        t_progress = threading.Thread(target=progress_simulator)
+        t_progress.daemon = True # Ensure it dies if main thread dies
+        t_progress.start()
+
         try:
             response = post_json_with_retry(
                 session,
@@ -338,7 +393,7 @@ class Shaobkj_APINode:
                 proxies=proxies,
                 verify=False,
             )
-            pbar.update_absolute(50)
+            # pbar.update_absolute(50) # Removed static update
 
             if response.status_code not in (200, 201, 202):
                 print(f"[ComfyUI-shaobkj] API Error Status: {response.status_code}")
@@ -424,9 +479,21 @@ class Shaobkj_APINode:
 
             raise RuntimeError(f"No image found in API response. Response: {sanitize_text(json.dumps(res_json, ensure_ascii=False))}")
         except Exception as e:
-            error_msg = f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"[ComfyUI-shaobkj] {error_msg}")
-            raise RuntimeError(f"Generation Failed: {str(e)}") from e
+            # Stop progress thread on error
+            progress_state["stop"] = True
+            t_progress.join(timeout=1.0)
+            
+            error_msg = str(e)
+            if "504" in error_msg:
+                raise RuntimeError("请求超时 (504 Gateway Time-out)。服务器处理时间过长，请稍后重试。")
+            raise RuntimeError(f"请求失败: {error_msg}")
+            
+        finally:
+            # Always stop progress thread and set to 100% on finish
+            progress_state["stop"] = True
+            if t_progress.is_alive():
+                t_progress.join(timeout=1.0)
+            pbar.update_absolute(100)
 
 
 class Shaobkj_APINode_Batch:
