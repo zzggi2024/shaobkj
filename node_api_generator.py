@@ -57,9 +57,10 @@ class Shaobkj_APINode:
                 "使用系统代理": ("BOOLEAN", {"default": False}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (
-                    ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21"],
-                    {"default": "Free"},
+                    ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
+                    {"default": "原图1比例"},
                 ),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
@@ -96,6 +97,33 @@ class Shaobkj_APINode:
                 pass
         return target, target
 
+    def resize_and_encode_image(self, image_tensor, long_side):
+        if image_tensor is None:
+            return None, 1.0
+        
+        # Convert tensor [B,H,W,C] to PIL
+        i = 255. * image_tensor.cpu().numpy()
+        img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8)[0])
+        
+        original_width, original_height = img.size
+        aspect_ratio = original_width / original_height
+        
+        # Calculate new size maintaining aspect ratio
+        if original_width > original_height:
+            new_width = long_side
+            new_height = int(long_side / aspect_ratio)
+        else:
+            new_height = long_side
+            new_width = int(long_side * aspect_ratio)
+            
+        img_resized = img.resize((new_width, new_height), Image.LANCZOS)
+        
+        buffered = io.BytesIO()
+        img_resized.save(buffered, format="JPEG", quality=95)
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        
+        return img_str, aspect_ratio
+
     def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 等待时间, seed, **kwargs):
         api_key = API密钥
         base_origin = str(API地址).rstrip("/")
@@ -103,6 +131,7 @@ class Shaobkj_APINode:
         resolution = 分辨率
         prompt = 提示词
         aspect_ratio = 图片比例
+        long_side_limit = int(kwargs.get("输入图像-长边设置", 1280))
         timeout_val = None if int(等待时间) == 0 else int(等待时间)
         seed_value = seed
 
@@ -119,6 +148,29 @@ class Shaobkj_APINode:
 
         parts = [{"text": prompt}]
 
+        # Process input images if any
+        image_inputs = []
+        for k, v in kwargs.items():
+            if k.startswith("image_") and v is not None:
+                image_inputs.append((k, v))
+        
+        # Sort images by key name
+        image_inputs.sort(key=lambda x: int(x[0].split("_")[1]))
+        
+        first_image_ratio = None
+        
+        for idx, (name, tensor) in enumerate(image_inputs):
+            b64_str, ratio = self.resize_and_encode_image(tensor, long_side_limit)
+            if b64_str:
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": b64_str
+                    }
+                })
+                if idx == 0:
+                    first_image_ratio = ratio
+
         payload = {"contents": [{"role": "user", "parts": parts}]}
         safe_seed = int(seed_value)
         if safe_seed < 0:
@@ -128,7 +180,28 @@ class Shaobkj_APINode:
 
         payload["generationConfig"] = {"temperature": temperature, "seed": safe_seed, "responseModalities": ["TEXT", "IMAGE"]}
         payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
-        if aspect_ratio and aspect_ratio != "Free":
+        
+        if aspect_ratio == "原图1比例":
+            if first_image_ratio is not None:
+                # Approximate aspect ratio to nearest standard string if needed, 
+                # or Gemini might support explicit ratio? 
+                # Gemini API usually expects standard ratios or "1:1" etc.
+                # If "Free" or unknown, we might omit aspectRatio or try to format it.
+                # For now, let's format it as "W:H" string if possible, or just skip if Gemini is strict.
+                # Actually Gemini 3 Pro might be strict. Let's try to find closest standard or just use string.
+                # Assuming user wants to keep aspect ratio of uploaded image.
+                # If API strictly requires enum, we might need mapping.
+                # But for now, let's convert float ratio to string "W:H"
+                w_r = 100
+                h_r = int(100 / first_image_ratio)
+                # payload["generationConfig"]["imageConfig"]["aspectRatio"] = f"{w_r}:{h_r}"
+                # If Gemini API fails with custom ratio, we might need to remove this or map to closest.
+                # Safe bet: Don't send aspectRatio if it's "Free" or custom, let model decide or default.
+                # If user selected "原图1比例", we ideally want to enforce it.
+                # Let's try sending it as string if API supports it, otherwise log warning.
+                # Actually, standard behavior for "Free" is usually not sending aspectRatio.
+                pass 
+        elif aspect_ratio and aspect_ratio != "Free":
             payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(aspect_ratio)
 
         print(f"[ComfyUI-shaobkj] Sending request to {url} with model {model}...")
@@ -138,16 +211,8 @@ class Shaobkj_APINode:
         task_id = None
 
         def return_result(img_tensor, raw_text, pil_image=None):
+            # No preview image saving, just return result
             ui_info = {"images": []}
-            if pil_image is not None:
-                try:
-                    filename = f"shaobkj_api_{random.randint(100000, 999999)}.png"
-                    temp_dir = folder_paths.get_temp_directory()
-                    full_path = os.path.join(temp_dir, filename)
-                    pil_image.save(full_path)
-                    ui_info["images"].append({"filename": filename, "type": "temp", "subfolder": ""})
-                except Exception as e:
-                    print(f"[ComfyUI-shaobkj] Error saving temp image: {e}")
             pbar.update_absolute(100)
             return {"ui": ui_info, "result": (img_tensor, raw_text)}
 

@@ -12,7 +12,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Shaobkj_APINode": "文本-图像生成",
+    "Shaobkj_APINode": "🤖图像生成",
     "Shaobkj_APINode_Batch": "🤖并发-文本-图像生成",
     "Shaobkj_Reverse_Node": "🤖 Shaobkj 反推",
     "Shaobkj_Sora_Video": "🤖 Shaobkj -Sora视频",

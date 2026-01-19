@@ -2,6 +2,9 @@
 import { app } from "/scripts/app.js";
 
 const DYNAMIC_NODES = [
+    "Shaobkj_APINode",
+    "文本-图像生成",
+    "🤖图像生成",
     "Shaobkj_Reverse_Node",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
@@ -25,7 +28,7 @@ const LONG_SIDE_WIDGET_NAME = "长边设置";
 const LONG_SIDE_WIDGET_LABEL = "输入图像-长边设置";
 const SHAOBKJ_NODE_COLOR = "#6C88B8";
 const SHAOBKJ_NODE_BGCOLOR = "#1E2633";
-const SHAOBKJ_TITLE_TEXT_COLOR = "#FF2D2D";
+const SHAOBKJ_TITLE_TEXT_COLOR = "#FF0000";
 
 function shouldManageDynamicInputsByNodeData(nodeData) {
     const name = nodeData?.name || "";
@@ -68,6 +71,50 @@ function isShaobkjRuntimeNode(node) {
         return true;
     }
     if (title && typeof title === "string" && title.toLowerCase().includes("shaobkj")) {
+        return true;
+    }
+    return false;
+}
+
+let shaobkjTitleHookInstalled = false;
+function installShaobkjTitleColorHook() {
+    if (shaobkjTitleHookInstalled) return true;
+    const proto =
+        globalThis?.LGraphNode?.prototype ||
+        globalThis?.LiteGraph?.LGraphNode?.prototype;
+    if (!proto) return false;
+
+    const candidates = ["drawTitle", "draw_title", "_drawTitle", "drawTitleBar", "draw_title_bar"];
+    for (const name of candidates) {
+        const original = proto?.[name];
+        if (typeof original !== "function") continue;
+        if (original.__shaobkj_wrapped) {
+            shaobkjTitleHookInstalled = true;
+            return true;
+        }
+
+        const wrapped = function (ctx) {
+            if (!isShaobkjRuntimeNode(this) || !ctx || typeof ctx.fillText !== "function") {
+                return original.apply(this, arguments);
+            }
+
+            const originalFillText = ctx.fillText;
+            ctx.fillText = function () {
+                const old = ctx.fillStyle;
+                ctx.fillStyle = SHAOBKJ_TITLE_TEXT_COLOR;
+                const r = originalFillText.apply(this, arguments);
+                ctx.fillStyle = old;
+                return r;
+            };
+            try {
+                return original.apply(this, arguments);
+            } finally {
+                ctx.fillText = originalFillText;
+            }
+        };
+        wrapped.__shaobkj_wrapped = true;
+        proto[name] = wrapped;
+        shaobkjTitleHookInstalled = true;
         return true;
     }
     return false;
@@ -117,6 +164,22 @@ function manageInputs(node) {
         }
     }
     
+    // Fix: Protect existing links from being lost during recreation
+    // Sometimes addInput/removeInput might shift indices, but LiteGraph usually handles it.
+    // However, if we are too aggressive, we might break things.
+    // The logic above only removes inputs if they are > targetCount AND have no link.
+    // So it should be safe.
+    // But let's double check if "recreate node" triggers something else.
+    // If "Recreate Node" is used, the node is destroyed and a new one created.
+    // The new node might not have inputs initially, or have default inputs.
+    // manageInputs adds them back.
+    // If links are restored by ComfyUI app, they are restored by index or name.
+    // If we change inputs async (setTimeout), link restoration might fail if slots don't exist yet.
+    // But onNodeCreated calls manageInputs immediately (in setTimeout 50ms).
+    // ComfyUI restores links after node creation.
+    // If we wait 50ms, links might try to connect to non-existent slots?
+    // Let's try to run manageInputs synchronously if possible, or very short timeout.
+    
     let currentMaxIndex = 0;
     if (imageInputs.length > 0) {
         const currentInputs = node.inputs.filter(inp => inp.name.startsWith(prefix));
@@ -149,6 +212,7 @@ function manageInputs(node) {
     if (setupLinkWidget(node)) {
         changed = true;
     }
+
     if (setupLongSideWidget(node)) {
         changed = true;
     }
@@ -240,6 +304,12 @@ app.registerExtension({
         app.__shaobkjDynamicInputsInstalled = true;
 
         started = true;
+        const ensureTitleHook = () => {
+            if (!installShaobkjTitleColorHook()) {
+                requestAnimationFrame(ensureTitleHook);
+            }
+        };
+        requestAnimationFrame(ensureTitleHook);
         const tick = () => {
             const graph = app?.graph;
             const nodes = graph?._nodes;
@@ -248,6 +318,7 @@ app.registerExtension({
             }
             for (const node of nodes) {
                 if (isShaobkjRuntimeNode(node)) {
+                    installShaobkjTitleColorHook();
                     setupNodeStyle(node);
                     setupLinkWidget(node);
                     setupLongSideWidget(node);
@@ -287,10 +358,15 @@ app.registerExtension({
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
                 
+                // Run manageInputs immediately to ensure slots exist for link restoration
+                // But keep setTimeout for style updates just in case
+                if (needsDynamicInputs) manageInputs(this);
+
                 setTimeout(() => {
                     setupNodeStyle(this);
                     setupLinkWidget(this);
                     setupLongSideWidget(this);
+                    // Check again
                     if (needsDynamicInputs) manageInputs(this);
                 }, 50);
                 

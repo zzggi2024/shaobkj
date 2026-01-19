@@ -88,6 +88,17 @@ def build_submit_timeout(wait_seconds: int):
     if w < 0:
         w = 1
     connect_timeout = min(10, w)
+    # Ensure read_timeout uses the user-provided wait_seconds (w)
+    # The read_timeout should be at least as long as the user wants to wait.
+    # Previously it might have been short if w was small but logic was correct: max(1, w)
+    # However, if w=180, read_timeout=180.
+    # If the server takes 244s, it should timeout at 180s.
+    # If it didn't timeout, maybe requests session settings or something else is interfering?
+    # Or maybe the server sends keep-alive packets or partial data?
+    # Requests read timeout is for "time between bytes".
+    # If the server streams data slowly, it might not trigger read timeout if gaps < timeout.
+    # But for a simple POST, it usually waits for the whole response.
+    # Let's ensure it's strictly set.
     read_timeout = max(1, w)
     return (connect_timeout, read_timeout)
 
@@ -128,27 +139,64 @@ def post_with_retry(
 ):
     last_exc = None
     resp = None
+    
+    # Extract total timeout limit if timeout is a tuple
+    total_timeout_limit = timeout[1] if isinstance(timeout, (tuple, list)) and len(timeout) > 1 else timeout
+    start_time = time.time()
+
     for attempt in range(1, int(max_retries) + 1):
+        # Check total timeout before next attempt
+        if total_timeout_limit is not None:
+            elapsed = time.time() - start_time
+            if elapsed >= total_timeout_limit:
+                raise requests.exceptions.ReadTimeout(f"Total execution time exceeded limit of {total_timeout_limit}s")
+            
+            # Adjust request timeout for this attempt to respect total limit
+            # If timeout is tuple (connect, read), adjust read part
+            current_remaining = total_timeout_limit - elapsed
+            if isinstance(timeout, (tuple, list)):
+                connect_timeout = timeout[0]
+                # Ensure we don't pass negative timeout
+                current_attempt_timeout = (connect_timeout, max(0.1, current_remaining))
+            else:
+                current_attempt_timeout = max(0.1, current_remaining)
+        else:
+            current_attempt_timeout = timeout
+
         try:
             resp = session.post(
                 url,
                 headers=headers,
-                timeout=timeout,
+                timeout=current_attempt_timeout,
                 verify=verify,
                 proxies=proxies,
                 **request_kwargs,
             )
         except requests.exceptions.ReadTimeout:
-            raise
+            # If it's the last attempt or total time exceeded, raise
+            if attempt >= max_retries or (total_timeout_limit and (time.time() - start_time) >= total_timeout_limit):
+                raise
+            last_exc = requests.exceptions.ReadTimeout("Read timed out")
+            # Don't sleep if we are close to timeout? 
+            # Standard logic below
         except requests.exceptions.RequestException as e:
             last_exc = e
             if attempt >= max_retries:
                 raise
-            time.sleep(2 * attempt)
+            # Check if sleep would exceed total timeout
+            sleep_time = 2 * attempt
+            if total_timeout_limit and (time.time() - start_time + sleep_time) > total_timeout_limit:
+                 # If sleeping would timeout, just raise or sleep less?
+                 # Let's just raise last exception if we can't retry effectively
+                 raise last_exc
+            time.sleep(sleep_time)
             continue
 
         if resp.status_code in (500, 502, 503, 504) and attempt < max_retries:
-            time.sleep(2 * attempt)
+            sleep_time = 2 * attempt
+            if total_timeout_limit and (time.time() - start_time + sleep_time) > total_timeout_limit:
+                 return resp # Return what we have if we can't retry
+            time.sleep(sleep_time)
             continue
         return resp
     if resp is not None:
