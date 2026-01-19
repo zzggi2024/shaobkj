@@ -133,9 +133,11 @@ class Shaobkj_Sora_Video:
 
         # 构造请求参数
         # 文档: https://zhzwx2axs4.apifox.cn/401540802e0
+        # Force video generation instruction
+        final_prompt = str(提示词) + "\n\n(Generate a video based on this description)"
         payload_data = {
             "model": 模型,
-            "prompt": 提示词,
+            "prompt": final_prompt,
             "seconds": str(生成时长),
             "size": api_size,
             "watermark": "false", # 默认无水印
@@ -233,6 +235,20 @@ class Shaobkj_Sora_Video:
             
             error_text = f"API Error {resp.status_code}: {err_msg}"
             print(f"[Shaobkj-Sora] {error_text}")
+            # Check for quota error
+            try:
+                if isinstance(err_msg, (dict, list)):
+                     raise_if_quota_error(resp.status_code, err_msg)
+                elif isinstance(err_msg, str):
+                     try:
+                        j = json.loads(err_msg)
+                        raise_if_quota_error(resp.status_code, j)
+                     except:
+                        pass
+            except RuntimeError:
+                raise
+            except:
+                pass
             raise RuntimeError(f"API Error {resp.status_code}: {err_msg}")
 
         task_id, direct_video_url, parsed_json, raw_text = extract_task_id_and_video_url(resp)
@@ -259,16 +275,24 @@ class Shaobkj_Sora_Video:
         start_time = time.time()
         pbar = ProgressBar(100)
         pbar.update_absolute(0)
-        poll_interval = 5
+        poll_interval = 2 # Start fast
         attempts = 0
         last_log_key = None
         
         fail_count = 0
+        effective_poll_url = None
+
         while True:
             elapsed = time.time() - start_time
             remaining = timeout_val - elapsed
             if remaining <= 0:
                 raise RuntimeError(f"视频生成超时 ({timeout_val}秒)")
+            
+            # Dynamic polling interval
+            if elapsed > 10 and poll_interval < 5:
+                poll_interval = 5
+            if elapsed > 60 and poll_interval < 10:
+                poll_interval = 10
             
             time.sleep(min(poll_interval, max(0.0, remaining)))
             
@@ -276,35 +300,31 @@ class Shaobkj_Sora_Video:
             t_params = {"_t": int(time.time() * 1000)}
             poll_resp = None
             last_exc = None
-            try:
-                poll_resp = session.get(
-                    alt_poll_url,
-                    headers=headers,
-                    json=alt_poll_body,
-                    params=t_params,
-                    verify=False,
-                    timeout=poll_req_timeout,
-                    proxies=proxies,
-                )
-            except Exception as e:
-                last_exc = e
+            
+            # Smart polling strategy
+            urls_to_try = []
+            if effective_poll_url:
+                urls_to_try.append((effective_poll_url, alt_poll_body if effective_poll_url == alt_poll_url else None))
+            else:
+                # Try preferred first
+                urls_to_try.append((alt_poll_url, alt_poll_body))
+                urls_to_try.append((poll_url, None))
 
-            if poll_resp is None or poll_resp.status_code != 200:
+            for p_url, p_body in urls_to_try:
                 try:
-                    poll_resp2 = session.get(
-                        poll_url,
-                        headers=headers,
-                        params=t_params,
-                        verify=False,
-                        timeout=poll_req_timeout,
-                        proxies=proxies,
-                    )
-                    if poll_resp2.status_code == 200:
-                        poll_resp = poll_resp2
+                    if p_body:
+                         poll_resp = session.get(p_url, headers=headers, json=p_body, params=t_params, verify=False, timeout=poll_req_timeout, proxies=proxies)
+                    else:
+                         poll_resp = session.get(p_url, headers=headers, params=t_params, verify=False, timeout=poll_req_timeout, proxies=proxies)
+                    
+                    if poll_resp.status_code == 200:
+                        if effective_poll_url is None:
+                            effective_poll_url = p_url # Remember the working URL
+                        break
                 except Exception as e:
-                    if poll_resp is None:
-                        last_exc = e if last_exc is None else last_exc
-
+                    last_exc = e
+                    poll_resp = None
+            
             attempts += 1
             if poll_resp is None:
                 fail_count += 1

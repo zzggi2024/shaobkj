@@ -12,8 +12,9 @@ app.registerExtension({
 				const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
 
                 // Style the node
-                this.color = "#006600"; // Green background for the node header
-                this.bgcolor = "#003300"; // Darker green background
+                // this.color = "#006600"; // Green background for the node header
+                // this.bgcolor = "#003300"; // Darker green background
+                // (Theme is now handled by shaobkj_theme.js)
 
                 // Add "Submit" Button
                 this.addWidget("button", "🔴 立即提交 (Submit)", null, () => {

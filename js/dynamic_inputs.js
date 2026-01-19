@@ -21,14 +21,69 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Reverse_Node",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
+    "Shaobkj_ConcurrentImageEdit",
+    "Shaobkj_HTTP_Load_Image",
+    "Shaobkj_HTTP_Send_Image",
 ];
 const MIN_INPUTS = 2;
 let started = false;
 const LONG_SIDE_WIDGET_NAME = "长边设置";
 const LONG_SIDE_WIDGET_LABEL = "输入图像-长边设置";
-const SHAOBKJ_NODE_COLOR = "#006600";
-const SHAOBKJ_NODE_BGCOLOR = "#003300";
+
+// 🎨 Shaobkj Cyber-Spectrum Theme Definition
+const THEME_CONFIG = {
+    // 🔮 创世系列 (图像生成) - Electric Violet
+    "Shaobkj_APINode": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_APINode_Batch": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🤖图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🤖并发-文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
+
+    // 🎬 导演系列 (视频生成) - Future Blue
+    "Shaobkj_Sora_Video": { color: "#0091EA", bgcolor: "#001A2E" },
+    "Shaobkj_Veo_Video": { color: "#0091EA", bgcolor: "#001A2E" },
+    "🤖 Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
+    "🤖 Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
+    "Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
+    "Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
+
+    // ⚡ 极速系列 (效率与工具) - Matrix Green
+    "Shaobkj_ConcurrentImageEdit": { color: "#00C853", bgcolor: "#003311" },
+    "Shaobkj_Reverse_Node": { color: "#00C853", bgcolor: "#003311" },
+    "🤖 Shaobkj 反推": { color: "#00C853", bgcolor: "#003311" },
+    "🤖并发-图像编辑": { color: "#00C853", bgcolor: "#003311" },
+    "Shaobkj 反推": { color: "#00C853", bgcolor: "#003311" },
+
+    // 🌐 桥接系列 (网络与传输) - Magma Orange
+    "Shaobkj_HTTP_Load_Image": { color: "#FF6D00", bgcolor: "#331400" },
+    "Shaobkj_HTTP_Send_Image": { color: "#FF6D00", bgcolor: "#331400" },
+    "🤖本地桥接-加载图片": { color: "#FF6D00", bgcolor: "#331400" },
+    "🤖本地桥接-发送图片": { color: "#FF6D00", bgcolor: "#331400" }
+};
+
+const DEFAULT_THEME = { color: "#006600", bgcolor: "#003300" }; // Fallback
 const SHAOBKJ_TITLE_TEXT_COLOR = "#FF0000";
+
+function getThemeForNode(node) {
+    const type = node.comfyClass || node.type;
+    const title = node.title;
+    
+    // Try by type/comfyClass
+    if (type && THEME_CONFIG[type]) return THEME_CONFIG[type];
+    
+    // Try by title
+    if (title && THEME_CONFIG[title]) return THEME_CONFIG[title];
+    
+    // Fallback logic for aliases not explicitly in map but having known keywords
+    if (title) {
+        if (title.includes("Sora") || title.includes("Veo")) return THEME_CONFIG["Shaobkj_Sora_Video"];
+        if (title.includes("反推") || title.includes("编辑")) return THEME_CONFIG["Shaobkj_ConcurrentImageEdit"];
+        if (title.includes("图像生成")) return THEME_CONFIG["Shaobkj_APINode"];
+        if (title.includes("桥接")) return THEME_CONFIG["Shaobkj_HTTP_Load_Image"];
+    }
+    
+    return DEFAULT_THEME;
+}
 
 function shouldManageDynamicInputsByNodeData(nodeData) {
     const name = nodeData?.name || "";
@@ -272,13 +327,16 @@ function setupLongSideWidget(node) {
 
 function setupNodeStyle(node) {
     if (!isShaobkjRuntimeNode(node)) return;
+    
+    const theme = getThemeForNode(node);
+    
     let changed = false;
-    if (node.color !== SHAOBKJ_NODE_COLOR) {
-        node.color = SHAOBKJ_NODE_COLOR;
+    if (node.color !== theme.color) {
+        node.color = theme.color;
         changed = true;
     }
-    if (node.bgcolor !== SHAOBKJ_NODE_BGCOLOR) {
-        node.bgcolor = SHAOBKJ_NODE_BGCOLOR;
+    if (node.bgcolor !== theme.bgcolor) {
+        node.bgcolor = theme.bgcolor;
         changed = true;
     }
     if (node.title_text_color !== SHAOBKJ_TITLE_TEXT_COLOR) {
@@ -350,8 +408,10 @@ app.registerExtension({
         const isShaobkjCategory = nodeData?.category && nodeData.category.startsWith("🤖shaobkj-APIbox");
         const needsDynamicInputs = shouldManageDynamicInputsByNodeData(nodeData);
         if (isShaobkjCategory || needsDynamicInputs) {
-            nodeType.prototype.color = SHAOBKJ_NODE_COLOR;
-            nodeType.prototype.bgcolor = SHAOBKJ_NODE_BGCOLOR;
+            // Apply theme prototype
+            const theme = getThemeForNode({ comfyClass: nodeData.name, title: nodeData.display_name });
+            nodeType.prototype.color = theme.color;
+            nodeType.prototype.bgcolor = theme.bgcolor;
             nodeType.prototype.title_text_color = SHAOBKJ_TITLE_TEXT_COLOR;
             
             const onNodeCreated = nodeType.prototype.onNodeCreated;
