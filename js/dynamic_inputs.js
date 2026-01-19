@@ -26,8 +26,8 @@ const MIN_INPUTS = 2;
 let started = false;
 const LONG_SIDE_WIDGET_NAME = "长边设置";
 const LONG_SIDE_WIDGET_LABEL = "输入图像-长边设置";
-const SHAOBKJ_NODE_COLOR = "#6C88B8";
-const SHAOBKJ_NODE_BGCOLOR = "#1E2633";
+const SHAOBKJ_NODE_COLOR = "#006600";
+const SHAOBKJ_NODE_BGCOLOR = "#003300";
 const SHAOBKJ_TITLE_TEXT_COLOR = "#FF0000";
 
 function shouldManageDynamicInputsByNodeData(nodeData) {
