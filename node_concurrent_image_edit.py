@@ -290,7 +290,6 @@ class Shaobkj_ConcurrentImageEdit:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "image": ("STRING", {"image_upload": True}),  # Upload widget
                 "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True}),
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
@@ -323,7 +322,7 @@ class Shaobkj_ConcurrentImageEdit:
     CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
-    def execute_concurrent_task(self, image, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 保存路径, **kwargs):
+    def execute_concurrent_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 保存路径, **kwargs):
         """
         Main execution function called by ComfyUI Queue.
         This function captures inputs (including connected tensors), prepares data, 
@@ -342,7 +341,7 @@ class Shaobkj_ConcurrentImageEdit:
             "long_side": int(kwargs.get("输入图像-长边设置", 1280)),
             "wait_time": int(kwargs.get("等待时间", 180)),
             "seed": int(kwargs.get("seed", 0)),
-            "image_name": image, # Uploaded image name
+            "image_name": None, # Removed upload widget
             "tensor_images": [],
             "save_path": 保存路径
         }

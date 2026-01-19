@@ -44,31 +44,61 @@ app.registerExtension({
                 // Dynamic Image Inputs Logic (For Slot Expansion)
                 // We need to manage input slots (connectors), NOT widgets, for image inputs.
                 
-                // Helper to check and add slots
+                // Helper to check and add/remove slots
                 const checkSlots = () => {
                     if (!this.inputs) this.inputs = [];
                     
-                    // Find highest connected image slot
-                    let maxIndex = 0;
-                    for (const slot of this.inputs) {
+                    // Find connected status of all image slots
+                    const imageSlots = []; // Stores {index, slotObject}
+                    
+                    // 1. Identify existing image slots
+                    for (let i = 0; i < this.inputs.length; i++) {
+                        const slot = this.inputs[i];
                         if (slot.name.startsWith("image_")) {
                             const num = parseInt(slot.name.replace("image_", ""));
-                            if (!isNaN(num) && slot.link !== null) {
-                                if (num > maxIndex) maxIndex = num;
+                            if (!isNaN(num)) {
+                                imageSlots.push({ num: num, index: i, link: slot.link });
                             }
                         }
                     }
                     
-                    // Target: ensure we have at least maxIndex + 1 (next empty slot)
-                    // But we start with image_1
-                    const targetIndex = maxIndex + 1;
+                    // Sort by number
+                    imageSlots.sort((a, b) => a.num - b.num);
                     
-                    // Ensure slots exist up to targetIndex
-                    for (let i = 1; i <= targetIndex; i++) {
+                    // 2. Determine target slot count
+                    // We want to keep all connected slots, plus one empty slot at the end.
+                    // But we also want to remove empty slots that are NOT the last one if we are "shrinking".
+                    // Actually, simpler logic:
+                    // Always ensure we have slots 1..N where N is (highest_connected_index + 1).
+                    // If highest connected is 0 (none), we need image_1.
+                    
+                    let maxConnectedNum = 0;
+                    for (const s of imageSlots) {
+                        if (s.link !== null) {
+                            if (s.num > maxConnectedNum) maxConnectedNum = s.num;
+                        }
+                    }
+                    
+                    const targetMaxNum = maxConnectedNum + 1;
+                    
+                    // 3. Add missing slots
+                    for (let i = 1; i <= targetMaxNum; i++) {
                         const name = `image_${i}`;
                         const existing = this.findInputSlot(name);
                         if (existing === -1) {
                             this.addInput(name, "IMAGE");
+                        }
+                    }
+                    
+                    // 4. Remove extra slots (those > targetMaxNum)
+                    // We iterate backwards to avoid index shifting issues when removing
+                    for (let i = this.inputs.length - 1; i >= 0; i--) {
+                        const slot = this.inputs[i];
+                        if (slot.name.startsWith("image_")) {
+                             const num = parseInt(slot.name.replace("image_", ""));
+                             if (!isNaN(num) && num > targetMaxNum) {
+                                 this.removeInput(i);
+                             }
                         }
                     }
                 };
