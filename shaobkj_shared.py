@@ -4,12 +4,15 @@ import re
 import shutil
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 import time
 import requests
 import io
 import base64
 from urllib.parse import urlparse
+from datetime import datetime
+import subprocess
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 CONFIG = {}
@@ -64,6 +67,41 @@ def resize_pil_long_side(image, long_side):
     if new_w == w and new_h == h:
         return image
     return image.resize((new_w, new_h), resample=Image.LANCZOS)
+
+
+def resize_and_encode_image(img, long_side):
+    """
+    Resize PIL image and encode to base64.
+    Returns (base64_string, aspect_ratio)
+    """
+    if img is None:
+        return None, 1.0
+    
+    # Ensure RGB
+    if hasattr(img, "mode") and img.mode != "RGB":
+        img = img.convert("RGB")
+    
+    # Calculate aspect ratio
+    w, h = img.size
+    ratio = w / h
+    
+    # Use existing resize logic
+    img_resized = resize_pil_long_side(img, long_side)
+    
+    buffered = io.BytesIO()
+    img_resized.save(buffered, format="JPEG", quality=95)
+    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    
+    return img_str, ratio
+
+
+def sanitize_text(s, max_len=600):
+    t = "" if s is None else str(s)
+    t = re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "data:image/...;base64,[省略]", t)
+    t = re.sub(r"[A-Za-z0-9+/=]{200,}", "[省略]", t)
+    if len(t) > max_len:
+        t = t[:max_len] + "...(省略)"
+    return t
 
 
 def disable_insecure_request_warnings():
@@ -421,3 +459,174 @@ def extract_image_from_json(res_json, session, proxies, api_key, api_origin, tim
                 pass
 
     return None
+
+# --- New Helper Functions for Phase 1 & 2 ---
+
+def smart_pad_images_to_tensor(pil_images):
+    """
+    Safely convert a list of PIL images to a batch tensor, 
+    automatically padding smaller images to the largest size in the batch.
+    Prevents errors when mixing aspect ratios/sizes in a batch.
+    """
+    if not pil_images:
+        return torch.empty((0, 1, 1, 3), dtype=torch.float32)
+
+    tensors = []
+    max_h = 0
+    max_w = 0
+
+    for img in pil_images:
+        if img is None: continue
+        try:
+            # Ensure RGB
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            
+            # Convert to float32 numpy array [H, W, 3]
+            img_array = np.array(img).astype(np.float32) / 255.0
+            
+            # To Tensor [1, H, W, 3]
+            tensor = torch.from_numpy(img_array)[None,]
+            
+            if tensor.shape[1] > max_h: max_h = tensor.shape[1]
+            if tensor.shape[2] > max_w: max_w = tensor.shape[2]
+            tensors.append(tensor)
+        except Exception as e:
+            print(f"[Shaobkj-Shared] Warning: Skipping broken image: {e}")
+            continue
+
+    if not tensors:
+        return torch.empty((0, 1, 1, 3), dtype=torch.float32)
+
+    padded_tensors = []
+    for tensor in tensors:
+        b, h, w, c = tensor.shape
+        if h == max_h and w == max_w:
+            padded_tensors.append(tensor)
+            continue
+        
+        # Pad: (left, right, top, bottom) for last 2 dims if NCHW, but here we have NHWC
+        # Torch F.pad works on last dimensions. 
+        # For NHWC, we need to permute to NCHW to pad H and W easily, or be careful.
+        # Easier: permute -> pad -> permute back
+        tensor_chw = tensor.permute(0, 3, 1, 2) # [1, 3, H, W]
+        pad_w = max_w - w
+        pad_h = max_h - h
+        # Pad right and bottom (filling with black/0)
+        padding = (0, pad_w, 0, pad_h) 
+        padded_tensor_chw = F.pad(tensor_chw, padding, "constant", 0)
+        padded_tensor_hwc = padded_tensor_chw.permute(0, 2, 3, 1) # [1, H, W, 3]
+        padded_tensors.append(padded_tensor_hwc)
+
+    return torch.cat(padded_tensors, dim=0)
+
+
+def robust_download_video(video_url, output_path, max_retries=3, timeout=300, headers=None):
+    """
+    Attempts to download a video using yt-dlp first, then falls back to system curl.
+    Prevents deadlocks by using subprocess with timeout and DEVNULL.
+    Supports custom headers for authentication.
+    """
+    import shutil
+    
+    print(f"[Shaobkj-Downloader] Downloading: {video_url}")
+
+    # 1. Try yt-dlp (Python library)
+    try:
+        import yt_dlp
+        ydl_opts = {
+            'outtmpl': output_path,
+            'retries': max_retries,
+            'quiet': True,
+            'noplaylist': True,
+            'merge_output_format': 'mp4',
+            'socket_timeout': 30,
+            'nocheckcertificate': True,
+        }
+        if headers:
+            ydl_opts['http_headers'] = headers
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
+        
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+            return True
+    except ImportError:
+        print("[Shaobkj-Downloader] yt-dlp not installed, skipping.")
+    except Exception as e:
+        print(f"[Shaobkj-Downloader] yt-dlp failed: {e}")
+        # Clean up potential partial file
+        if os.path.exists(output_path):
+            try: os.remove(output_path)
+            except: pass
+
+    # 2. Fallback to Curl
+    curl_path = shutil.which("curl")
+    if curl_path:
+        for attempt in range(max_retries):
+            try:
+                print(f"[Shaobkj-Downloader] Trying curl (attempt {attempt+1})...")
+                cmd = [
+                    curl_path, "-k", "-L",
+                    "--connect-timeout", "20",
+                    "--max-time", str(timeout),
+                    "-o", output_path,
+                    video_url
+                ]
+                # Add headers
+                if headers:
+                    for k, v in headers.items():
+                        cmd.extend(["-H", f"{k}: {v}"])
+
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=timeout + 10,
+                    check=True
+                )
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 1024:
+                    return True
+            except subprocess.TimeoutExpired:
+                print("[Shaobkj-Downloader] Curl timed out.")
+            except Exception as e:
+                print(f"[Shaobkj-Downloader] Curl failed: {e}")
+            time.sleep(2)
+    
+    return False
+
+
+def save_local_record(record_type, id_val, remark, source_info):
+    """
+    Appends a record to a local text file for history tracking.
+    """
+    try:
+        current_dir = os.path.dirname(os.path.realpath(__file__))
+        filename = f"{record_type}_history.txt"
+        file_path = os.path.join(current_dir, filename)
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        remark_str = remark.strip() if remark else "None"
+        
+        new_record = (
+            f"[{timestamp}]\n"
+            f"ID:     {id_val}\n"
+            f"Remark: {remark_str}\n"
+            f"Source: {source_info}\n"
+            f"----------------------------------------\n"
+        )
+        
+        old_content = ""
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    old_content = f.read()
+            except:
+                pass
+        
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(new_record + old_content)
+        return True
+    except Exception as e:
+        print(f"[Shaobkj-Recorder] Failed to save record: {e}")
+        return False

@@ -1,2 +1,5 @@
 requests
 Pillow
+pandas
+openpyxl
+yt-dlp

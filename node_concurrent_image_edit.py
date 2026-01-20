@@ -21,244 +21,12 @@ from .shaobkj_shared import (
     disable_insecure_request_warnings,
     build_submit_timeout,
     post_json_with_retry,
-    auth_headers_for_same_origin
+    auth_headers_for_same_origin,
+    resize_and_encode_image,
+    extract_image_from_json,
+    save_local_record,
+    sanitize_text
 )
-
-# ----------------------------------------------------------------------------
-# Helper Functions (Adapted from node_api_generator.py to avoid dependency)
-# ----------------------------------------------------------------------------
-
-def resize_and_encode_pil(img, long_side):
-    """
-    Resize PIL image and encode to base64.
-    """
-    if img is None:
-        return None, 1.0
-    
-    # Ensure RGB
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-
-    original_width, original_height = img.size
-    aspect_ratio = original_width / original_height
-    
-    # Calculate new size maintaining aspect ratio
-    if original_width > original_height:
-        new_width = long_side
-        new_height = int(long_side / aspect_ratio)
-    else:
-        new_height = long_side
-        new_width = int(long_side * aspect_ratio)
-        
-    img_resized = img.resize((new_width, new_height), Image.LANCZOS)
-    
-    buffered = io.BytesIO()
-    img_resized.save(buffered, format="JPEG", quality=95)
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    
-    return img_str, aspect_ratio
-
-def sanitize_text(s, max_len=1200):
-    t = "" if s is None else str(s)
-    t = re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "data:image/...;base64,[省略]", t)
-    t = re.sub(r"[A-Za-z0-9+/=]{200,}", "[省略]", t)
-    if len(t) > max_len:
-        t = t[:max_len] + "...(省略)"
-    return t
-
-# ----------------------------------------------------------------------------
-# Background Worker
-# ----------------------------------------------------------------------------
-
-def run_concurrent_task(data):
-    """
-    Background task to execute the API call.
-    """
-    task_id_local = f"task_{int(time.time())}_{random.randint(1000,9999)}"
-    print(f"[ComfyUI-shaobkj] Starting concurrent task {task_id_local}...")
-    
-    try:
-        # 1. Parse Data
-        api_key = data.get("api_key")
-        api_url_base = data.get("api_url", "https://yhmx.work")
-        model = data.get("model", "gemini-3-pro-image-preview")
-        use_proxy = data.get("use_proxy", False)
-        resolution = data.get("resolution", "1k")
-        prompt = data.get("prompt", "")
-        aspect_ratio = data.get("aspect_ratio", "原图1比例")
-        long_side = int(data.get("long_side", 1280))
-        wait_time = int(data.get("wait_time", 180))
-        seed_val = int(data.get("seed", 0))
-        
-        # Collect all image paths
-        image_paths = []
-        if data.get("image_path"):
-            image_paths.append(data.get("image_path"))
-        
-        # Handle additional images
-        additional_images = data.get("additional_images", [])
-        for item in additional_images:
-            if isinstance(item, dict) and item.get("value"):
-                 # Resolve path
-                 try:
-                     p = folder_paths.get_annotated_filepath(item.get("value"))
-                     if p and os.path.exists(p):
-                         image_paths.append(p)
-                 except Exception:
-                     pass
-
-        if not api_key:
-            raise ValueError("API Key is required")
-        
-        if not image_paths:
-            raise ValueError(f"No valid images found.")
-
-        # 3. Prepare API Request
-        base_origin = str(api_url_base).rstrip("/")
-        url = f"{base_origin}/v1beta/models/{model}:generateContent"
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
-        
-        parts = [{"text": prompt}]
-        
-        # 2. Load and Process Images
-        for idx, img_p in enumerate(image_paths):
-            try:
-                img = Image.open(img_p)
-                img = ImageOps.exif_transpose(img) # Fix rotation
-                b64_str, img_ratio = resize_and_encode_pil(img, long_side)
-                if b64_str:
-                    parts.append({
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": b64_str
-                        }
-                    })
-            except Exception as e:
-                print(f"[ComfyUI-shaobkj] Error processing image {img_p}: {e}")
-
-        # Seed Logic
-        safe_seed = seed_val
-        if safe_seed < 0:
-            safe_seed = random.randint(0, 2147483647)
-        if safe_seed > 2147483647:
-            safe_seed = safe_seed % 2147483647
-
-        payload = {
-            "contents": [{"role": "user", "parts": parts}],
-            "generationConfig": {
-                "temperature": 0.7, 
-                "seed": safe_seed, 
-                "responseModalities": ["TEXT", "IMAGE"]
-            }
-        }
-        payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
-
-        # Aspect Ratio Logic (Similar to APINode)
-        if aspect_ratio != "原图1比例" and aspect_ratio != "Free":
-            payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(aspect_ratio)
-
-        # 4. Send Request
-        disable_insecure_request_warnings()
-        session, proxies = create_requests_session(bool(use_proxy))
-        submit_timeout = build_submit_timeout(wait_time)
-
-        print(f"[ComfyUI-shaobkj] {task_id_local}: Sending request...")
-        response = post_json_with_retry(
-            session,
-            url,
-            headers=headers,
-            payload=payload,
-            timeout=submit_timeout,
-            proxies=proxies,
-            verify=False
-        )
-        response.raise_for_status()
-        res_json = response.json()
-
-        # 5. Extract Result (simplified logic for concurrent edit)
-        # We try to find the image data directly or download URL
-        final_image_data = None
-        
-        # Helper to extract
-        def extract_img(json_data):
-            if "candidates" in json_data:
-                for cand in json_data["candidates"]:
-                    for part in cand.get("content", {}).get("parts", []):
-                        if "inlineData" in part:
-                            return base64.b64decode(part["inlineData"]["data"])
-                        if "inline_data" in part:
-                            return base64.b64decode(part["inline_data"]["data"])
-            return None
-
-        final_image_data = extract_img(res_json)
-        
-        # If not found, check task_id for polling (simplified for this edit node)
-        # NOTE: For "Edit" node, usually it returns quickly. If it enters polling, 
-        # we might need full polling logic. 
-        # For simplicity and "Concurrent" nature, we will try to support polling too.
-        
-        if not final_image_data:
-            # Check for task_id
-             task_id = res_json.get("id") or res_json.get("task_id")
-             if not task_id and "data" in res_json:
-                 task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
-             
-             if task_id:
-                 print(f"[ComfyUI-shaobkj] {task_id_local}: Polling task {task_id}...")
-                 poll_url = f"{url}/{task_id}"
-                 poll_timeout_val = 86400 if wait_time == 0 else wait_time
-                 start_poll = time.time()
-                 
-                 while True:
-                     if (time.time() - start_poll) > poll_timeout_val:
-                         raise RuntimeError("Timeout polling")
-                     
-                     time.sleep(2)
-                     try:
-                         poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=30)
-                         if poll_resp.status_code == 200:
-                             poll_json = poll_resp.json()
-                             final_image_data = extract_img(poll_json)
-                             if final_image_data:
-                                 break
-                             
-                             status = poll_json.get("status") or poll_json.get("task_status")
-                             if status in ["FAILED", "ERROR"]:
-                                 raise RuntimeError(f"Task failed: {status}")
-                     except Exception as e:
-                         print(f"[ComfyUI-shaobkj] Polling error: {e}")
-
-        # 6. Save Result
-        if final_image_data:
-            output_dir = folder_paths.get_output_directory()
-            filename = f"concurrent_edit_{int(time.time())}_{random.randint(1000,9999)}.jpg"
-            out_path = os.path.join(output_dir, filename)
-            
-            with open(out_path, "wb") as f:
-                f.write(final_image_data)
-            
-            print(f"[ComfyUI-shaobkj] {task_id_local}: Success! Saved to {out_path}")
-            # Send socket event to notify UI? (Optional, but nice)
-            PromptServer.instance.send_sync("shaobkj.concurrent.success", {"task_id": task_id_local, "filename": filename})
-        else:
-            raise RuntimeError("No image data found in response")
-
-    except Exception as e:
-        err_msg = str(e)
-        # Simplify common API errors
-        if "401" in err_msg or "Unauthorized" in err_msg or "invalid_api_key" in err_msg:
-             err_msg = "❌ 错误：API Key 无效或未授权 (401 Unauthorized)。请检查您的 API Key 是否正确。"
-        elif "404" in err_msg or "Not Found" in err_msg:
-             err_msg = "❌ 错误：API 地址或模型未找到 (404 Not Found)。请检查 API 地址和模型名称。"
-        elif "429" in err_msg or "Too Many Requests" in err_msg or "quota" in err_msg.lower():
-             err_msg = "❌ 错误：API 配额耗尽或请求过于频繁 (429 Too Many Requests)。"
-        elif "500" in err_msg or "Internal Server Error" in err_msg:
-             err_msg = "❌ 错误：API 服务端内部错误 (500 Internal Server Error)。"
-             
-        print(f"[ComfyUI-shaobkj] {task_id_local}: {err_msg}")
-        traceback.print_exc()
-        PromptServer.instance.send_sync("shaobkj.concurrent.error", {"task_id": task_id_local, "error": err_msg})
-
 
 # ----------------------------------------------------------------------------
 # API Route
@@ -430,9 +198,6 @@ def run_concurrent_task_internal(data):
              raise ValueError("API Key is required")
 
         # Collect Images
-        # 1. From Upload (path)
-        # 2. From Tensor (PIL objects)
-        
         pil_images = []
         
         # Process Uploaded Image
@@ -469,14 +234,19 @@ def run_concurrent_task_internal(data):
 
         # Prepare Request
         base_origin = str(api_url_base).rstrip("/")
+        api_origin = urlparse(base_origin).netloc
+        
         url = f"{base_origin}/v1beta/models/{model}:generateContent"
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
-        parts = [{"text": prompt}]
+        # Force generation instruction
+        final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
+        parts = [{"text": final_prompt}]
         
         for img in pil_images:
             try:
-                b64_str, img_ratio = resize_and_encode_pil(img, long_side)
+                # Use shared helper
+                b64_str, img_ratio = resize_and_encode_image(img, long_side)
                 if b64_str:
                     parts.append({
                         "inline_data": {
@@ -487,9 +257,6 @@ def run_concurrent_task_internal(data):
             except Exception as e:
                 print(f"[ComfyUI-shaobkj] Error encoding image: {e}")
 
-        # ... (Rest of the logic: Seed, Payload, Request, Polling, Save) ...
-        # Copied from previous run_concurrent_task but adapted variables
-        
         # Seed Logic
         safe_seed = seed_val
         if safe_seed < 0:
@@ -528,20 +295,12 @@ def run_concurrent_task_internal(data):
         response.raise_for_status()
         res_json = response.json()
 
-        # Extract Result
-        def extract_img(json_data):
-            if "candidates" in json_data:
-                for cand in json_data["candidates"]:
-                    for part in cand.get("content", {}).get("parts", []):
-                        if "inlineData" in part:
-                            return base64.b64decode(part["inlineData"]["data"])
-                        if "inline_data" in part:
-                            return base64.b64decode(part["inline_data"]["data"])
-            return None
-
-        final_image_data = extract_img(res_json)
+        # Extract Result using shared helper
+        extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
         
-        if not final_image_data:
+        task_id = None
+        
+        if not extracted_img:
              task_id = res_json.get("id") or res_json.get("task_id")
              if not task_id and "data" in res_json:
                  task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
@@ -551,6 +310,7 @@ def run_concurrent_task_internal(data):
                  poll_url = f"{url}/{task_id}"
                  poll_timeout_val = 86400 if wait_time == 0 else wait_time
                  start_poll = time.time()
+                 fail_count = 0
                  
                  while True:
                      if (time.time() - start_poll) > poll_timeout_val:
@@ -559,20 +319,24 @@ def run_concurrent_task_internal(data):
                      time.sleep(2)
                      try:
                          poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=30)
+                         fail_count = 0
                          if poll_resp.status_code == 200:
                              poll_json = poll_resp.json()
-                             final_image_data = extract_img(poll_json)
-                             if final_image_data:
+                             extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60)
+                             if extracted_img:
                                  break
                              
                              status = poll_json.get("status") or poll_json.get("task_status")
                              if status in ["FAILED", "ERROR"]:
                                  raise RuntimeError(f"Task failed: {status}")
                      except Exception as e:
+                         fail_count += 1
                          print(f"[ComfyUI-shaobkj] Polling error: {e}")
+                         if fail_count > 10:
+                             raise
 
         # Save Result
-        if final_image_data:
+        if extracted_img:
             filename = f"concurrent_edit_{int(time.time())}_{random.randint(1000,9999)}.jpg"
             
             # Determine output directory
@@ -591,16 +355,30 @@ def run_concurrent_task_internal(data):
 
             out_path = os.path.join(out_dir, filename)
             
-            with open(out_path, "wb") as f:
-                f.write(final_image_data)
+            extracted_img.save(out_path, format="JPEG", quality=95)
             
             print(f"[ComfyUI-shaobkj] {task_id_local}: Success! Saved to {out_path}")
+            
+            # Record success
+            save_local_record("Concurrent_Edit", str(task_id or task_id_local), "Success", api_url_base)
+            
             PromptServer.instance.send_sync("shaobkj.concurrent.success", {"task_id": task_id_local, "filename": filename, "path": out_path})
         else:
-            raise RuntimeError("No image data found in response")
+            brief = sanitize_text(json.dumps(res_json, ensure_ascii=False))
+            raise RuntimeError(f"No image data found in response: {brief}")
 
     except Exception as e:
-        err_msg = f"Error: {str(e)}"
+        err_msg = str(e)
+        # Simplify common API errors
+        if "401" in err_msg or "Unauthorized" in err_msg or "invalid_api_key" in err_msg:
+             err_msg = "❌ 错误：API Key 无效或未授权 (401 Unauthorized)。请检查您的 API Key 是否正确。"
+        elif "404" in err_msg or "Not Found" in err_msg:
+             err_msg = "❌ 错误：API 地址或模型未找到 (404 Not Found)。请检查 API 地址和模型名称。"
+        elif "429" in err_msg or "Too Many Requests" in err_msg or "quota" in err_msg.lower():
+             err_msg = "❌ 错误：API 配额耗尽或请求过于频繁 (429 Too Many Requests)。"
+        elif "500" in err_msg or "Internal Server Error" in err_msg:
+             err_msg = "❌ 错误：API 服务端内部错误 (500 Internal Server Error)。"
+             
         print(f"[ComfyUI-shaobkj] {task_id_local}: {err_msg}")
         traceback.print_exc()
         PromptServer.instance.send_sync("shaobkj.concurrent.error", {"task_id": task_id_local, "error": err_msg})

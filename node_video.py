@@ -20,6 +20,8 @@ from .shaobkj_shared import (
     post_with_retry,
     resize_pil_long_side,
     tensor_to_pil,
+    robust_download_video,
+    save_local_record,
 )
 from comfy_api.latest import InputImpl
 from comfy.utils import ProgressBar
@@ -460,37 +462,47 @@ class Shaobkj_Sora_Video:
             
     def download_video(self, video_url, full_response, session=None, headers=None, api_origin="", timeout_budget=None):
         print(f"[Shaobkj-Sora] Downloading video from {video_url}...")
-        file_path = ""
-        try:
-            dl_headers = auth_headers_for_same_origin(str(video_url), api_origin, headers or {})
-            dl_timeout = 60 if timeout_budget is None else max(1, int(timeout_budget))
-
-            if session:
-                if dl_headers:
+        
+        filename = f"sora_{int(time.time())}_{random.randint(1000,9999)}.mp4"
+        output_dir = folder_paths.get_output_directory()
+        file_path = os.path.join(output_dir, filename)
+        
+        dl_timeout = 300 if timeout_budget is None else max(30, int(timeout_budget))
+        
+        # Prepare headers for auth if needed
+        dl_headers = auth_headers_for_same_origin(str(video_url), api_origin, headers or {})
+        
+        # 1. Try robust download (yt-dlp -> curl)
+        success = robust_download_video(video_url, file_path, max_retries=3, timeout=dl_timeout, headers=dl_headers)
+        
+        # 2. Fallback to requests if robust failed
+        if not success:
+             print("[Shaobkj-Sora] Robust download failed. Trying fallback (requests)...")
+             try:
+                if session:
                     v_resp = session.get(video_url, headers=dl_headers, stream=True, verify=False, timeout=dl_timeout)
                 else:
-                    v_resp = session.get(video_url, stream=True, verify=False, timeout=dl_timeout)
-            else:
-                if dl_headers:
                     v_resp = requests.get(video_url, headers=dl_headers, stream=True, verify=False, timeout=dl_timeout)
-                else:
-                    v_resp = requests.get(video_url, stream=True, verify=False, timeout=dl_timeout)
-            v_resp.raise_for_status()
-            
-            # 将视频保存到临时文件以便加载
-            filename = f"sora_{int(time.time())}_{random.randint(1000,9999)}.mp4"
-            output_dir = folder_paths.get_output_directory()
-            file_path = os.path.join(output_dir, filename)
-            
-            with open(file_path, "wb") as f:
-                for chunk in v_resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
+                v_resp.raise_for_status()
+                
+                with open(file_path, "wb") as f:
+                    for chunk in v_resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                success = True
+             except Exception as e:
+                print(f"[Shaobkj-Sora] Fallback download failed: {e}")
+                # Don't raise yet, check if file exists (maybe robust succeeded partially?) No, robust cleans up.
+                
+        if success and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
             print(f"[Shaobkj-Sora] Video saved to {file_path}")
+            
+            # Log success
+            task_id = "unknown"
+            if isinstance(full_response, dict):
+                 task_id = full_response.get("id") or full_response.get("task_id") or "unknown"
+            save_local_record("Sora_Video", str(task_id), "Download Success", video_url)
             
             video_obj = InputImpl.VideoFromFile(file_path)
             return (video_obj, json.dumps(full_response, ensure_ascii=False))
-            
-        except Exception as e:
-            print(f"[Shaobkj-Sora] 加载视频帧失败: {e}")
-            raise
+        else:
+            raise RuntimeError(f"Failed to download video from {video_url}")

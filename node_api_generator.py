@@ -12,6 +12,7 @@ import time
 import traceback
 import concurrent.futures
 from urllib.parse import urlparse
+import pandas as pd
 
 import torch.nn.functional as F
 
@@ -24,6 +25,7 @@ from .shaobkj_shared import (
     pil_to_tensor,
     post_json_with_retry,
     extract_image_from_json,
+    smart_pad_images_to_tensor,
 )
 from comfy.utils import ProgressBar
 
@@ -416,7 +418,7 @@ class Shaobkj_APINode_Batch:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "提示词列表": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": "一只猫\n一只狗"}),
+                "提示词列表": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": "一只猫\n一只狗", "placeholder": "每行一个提示词，或者拖入CSV/Excel文件路径"}),
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
                 "模型选择": (["gemini-3-pro-image-preview"], {"default": "gemini-3-pro-image-preview"}),
@@ -431,6 +433,9 @@ class Shaobkj_APINode_Batch:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
             },
+            "optional": {
+                "文件列名": ("STRING", {"default": "prompt", "multiline": False, "tooltip": "CSV/Excel中提示词所在的列名"}),
+            }
         }
 
     RETURN_TYPES = ("IMAGE", "STRING")
@@ -438,7 +443,7 @@ class Shaobkj_APINode_Batch:
     FUNCTION = "generate_images_batch"
     CATEGORY = "🤖shaobkj-APIbox"
 
-    def generate_images_batch(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词列表, 图片比例, 等待时间, 并发数, seed, **kwargs):
+    def generate_images_batch(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词列表, 图片比例, 等待时间, 并发数, seed, 文件列名="prompt", **kwargs):
         api_key = API密钥
         base_origin = str(API地址).rstrip("/")
         api_origin = urlparse(base_origin).netloc
@@ -450,7 +455,32 @@ class Shaobkj_APINode_Batch:
         if not api_key:
             raise ValueError("API Key is required.")
 
-        prompts = [p.strip() for p in str(提示词列表 or "").splitlines() if p.strip()]
+        # --- Phase 1 Feature: Excel/CSV Support ---
+        raw_input = str(提示词列表 or "").strip()
+        prompts = []
+        
+        # Check if input looks like a file path and exists
+        if raw_input and (raw_input.endswith('.csv') or raw_input.endswith('.xlsx') or raw_input.endswith('.xls')) and os.path.exists(raw_input.strip('"')):
+            file_path = raw_input.strip('"')
+            print(f"[Shaobkj-Batch] Reading prompts from file: {file_path}")
+            try:
+                if file_path.endswith('.csv'):
+                    df = pd.read_csv(file_path)
+                else:
+                    df = pd.read_excel(file_path)
+                
+                if 文件列名 in df.columns:
+                    prompts = df[文件列名].dropna().astype(str).tolist()
+                    print(f"[Shaobkj-Batch] Loaded {len(prompts)} prompts from column '{文件列名}'")
+                else:
+                    print(f"[Shaobkj-Batch] Warning: Column '{文件列名}' not found. Columns: {df.columns.tolist()}")
+                    raise ValueError(f"列 '{文件列名}' 不存在于文件中")
+            except Exception as e:
+                raise ValueError(f"读取文件失败: {e}")
+        else:
+            # Fallback to standard multiline text
+            prompts = [p.strip() for p in raw_input.splitlines() if p.strip()]
+
         if not prompts:
             raise ValueError("提示词列表不能为空。")
 
@@ -531,18 +561,6 @@ class Shaobkj_APINode_Batch:
             if len(t) > max_len:
                 t = t[:max_len] + "...(省略)"
             return t
-
-        def pad_tensor_to(t, max_h, max_w):
-            if not isinstance(t, torch.Tensor) or t.dim() != 4:
-                return t
-            b, h, w, c = t.shape
-            if h == max_h and w == max_w:
-                return t
-            tch = t.permute(0, 3, 1, 2)
-            pad_w = max_w - w
-            pad_h = max_h - h
-            padded = F.pad(tch, (0, pad_w, 0, pad_h), "constant", 0)
-            return padded.permute(0, 2, 3, 1)
 
         def generate_one(index, prompt):
             local_seed = normalize_seed(int(seed) + int(index))
@@ -663,9 +681,37 @@ class Shaobkj_APINode_Batch:
         if not ok_tensors:
             raise RuntimeError(f"批量生成全部失败，示例错误: {errors[0][1] if errors else '未知错误'}")
 
+        # --- Phase 1 Feature: Smart Padding ---
+        # The previous pad_tensor_to logic was basic. Now we use the logic inspired by nkxx but adapted for tensors.
+        # However, nkxx logic converts PIL->Tensor with padding. Here we already have tensors.
+        # The existing logic here already pads to max_h/max_w.
+        # Let's verify if we need to change it. 
+        # The existing logic:
+        # max_h = max(int(t.shape[1]) for t in ok_tensors)
+        # max_w = max(int(t.shape[2]) for t in ok_tensors)
+        # padded = [pad_tensor_to(t, max_h, max_w) for t in ok_tensors]
+        # This is already what "Smart Padding" does (Auto-Padding).
+        # So I just need to make sure pad_tensor_to is robust.
+        
+        def pad_tensor_to_v2(t, max_h, max_w):
+            if not isinstance(t, torch.Tensor) or t.dim() != 4:
+                return t
+            b, h, w, c = t.shape
+            if h == max_h and w == max_w:
+                return t
+            # T is [B, H, W, C]
+            # Permute to [B, C, H, W] for padding
+            tch = t.permute(0, 3, 1, 2)
+            pad_w = max_w - w
+            pad_h = max_h - h
+            # Pad right and bottom
+            padded = F.pad(tch, (0, pad_w, 0, pad_h), "constant", 0)
+            # Permute back
+            return padded.permute(0, 2, 3, 1)
+
         max_h = max(int(t.shape[1]) for t in ok_tensors)
         max_w = max(int(t.shape[2]) for t in ok_tensors)
-        padded = [pad_tensor_to(t, max_h, max_w) for t in ok_tensors]
+        padded = [pad_tensor_to_v2(t, max_h, max_w) for t in ok_tensors]
         batch_tensor = torch.cat(padded, dim=0)
 
         lines = [f"批量生成完成 | 总数: {len(prompts)} | 成功: {len(ok_tensors)} | 失败: {len(errors)}"]
