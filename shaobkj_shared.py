@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 from datetime import datetime
 import subprocess
 
+import threading
+
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 CONFIG = {}
 if os.path.exists(CONFIG_PATH):
@@ -22,6 +24,52 @@ if os.path.exists(CONFIG_PATH):
             CONFIG = json.load(f)
     except Exception as e:
         print(f"[ComfyUI-shaobkj] Error loading config.json: {e}")
+
+# --- Async Task Manager ---
+ASYNC_TASK_FILE = os.path.join(os.path.dirname(__file__), "shaobkj_async_history.json")
+async_task_lock = threading.Lock()
+
+def _read_async_tasks():
+    if not os.path.exists(ASYNC_TASK_FILE): return {}
+    try:
+        with open(ASYNC_TASK_FILE, 'r', encoding='utf-8') as f:
+            tasks = json.load(f)
+        return tasks if isinstance(tasks, dict) else {}
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+def _write_async_tasks(tasks):
+    try:
+        # Simple cleanup: keep last 50 tasks
+        if len(tasks) > 50:
+             # Sort by timestamp if available, else by key
+             sorted_keys = sorted(tasks.keys(), key=lambda k: tasks[k].get("submitted_at", "0"))
+             keys_to_remove = sorted_keys[:-50]
+             for k in keys_to_remove:
+                 if tasks[k].get("status") in ["downloaded", "failed"]:
+                     del tasks[k]
+
+        with open(ASYNC_TASK_FILE, 'w', encoding='utf-8') as f:
+            json.dump(tasks, f, indent=4, ensure_ascii=False)
+    except IOError as e:
+        print(f"[Shaobkj-Async] Write failed: {e}")
+
+def update_async_task(task_id, data):
+    with async_task_lock:
+        tasks = _read_async_tasks()
+        if task_id not in tasks:
+            tasks[task_id] = {}
+        tasks[task_id].update(data)
+        _write_async_tasks(tasks)
+
+def get_async_task(task_id):
+    with async_task_lock:
+        tasks = _read_async_tasks()
+        return tasks.get(task_id)
+
+def get_all_async_tasks():
+    with async_task_lock:
+        return _read_async_tasks()
 
 
 def get_config_value(key, env_key, default):

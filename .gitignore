@@ -3,3 +3,5 @@ api_keys.yaml
 *.env
 __pycache__/
 .trae/
+Concurrent_Edit_history.txt
+shaobkj_async_history.json
