@@ -34,7 +34,7 @@ class Shaobkj_Reverse_Node:
                 "使用系统代理": ("BOOLEAN", {"default": False}),
                 "长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "等待时间": ("INT", {"default": 0, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "谷歌搜索": ("BOOLEAN", {"default": False}),
                 "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
             },

@@ -65,7 +65,7 @@ class Shaobkj_APINode:
                 ),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
             },
         }
@@ -443,7 +443,7 @@ class Shaobkj_APINode_Batch:
                 ),
                 "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
                 "并发数": ("INT", {"default": 0, "min": 0, "max": 10, "step": 1, "tooltip": "0=智能并发（按任务数自动扩展，上限10）"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
             },
             "optional": {

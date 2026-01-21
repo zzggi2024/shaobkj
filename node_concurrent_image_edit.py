@@ -357,7 +357,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "Batch拆分模式": ("BOOLEAN", {"default": False}),
                 "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)"}),
                 "保存路径": ("STRING", {"default": "", "multiline": False, "placeholder": "默认为 output 目录"}),

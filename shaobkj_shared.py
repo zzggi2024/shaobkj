@@ -251,13 +251,6 @@ def post_with_retry(
                 proxies=proxies,
                 **request_kwargs,
             )
-        except requests.exceptions.ReadTimeout:
-            # If it's the last attempt or total time exceeded, raise
-            if attempt >= max_retries or (total_timeout_limit and (time.time() - start_time) >= total_timeout_limit):
-                raise
-            last_exc = requests.exceptions.ReadTimeout("Read timed out")
-            # Don't sleep if we are close to timeout? 
-            # Standard logic below
         except requests.exceptions.RequestException as e:
             last_exc = e
             if attempt >= max_retries:
@@ -265,16 +258,21 @@ def post_with_retry(
             # Check if sleep would exceed total timeout
             sleep_time = 2 * attempt
             if total_timeout_limit and (time.time() - start_time + sleep_time) > total_timeout_limit:
-                 # If sleeping would timeout, just raise or sleep less?
-                 # Let's just raise last exception if we can't retry effectively
-                 raise last_exc
+                 # If sleeping would timeout, check if we have a response
+                 if resp is not None:
+                     return resp
+                 # No response yet, so we must raise the last exception
+                 raise last_exc or requests.exceptions.RequestException("Request failed with no response and retry limit reached")
             time.sleep(sleep_time)
             continue
 
         if resp.status_code in (500, 502, 503, 504) and attempt < max_retries:
             sleep_time = 2 * attempt
             if total_timeout_limit and (time.time() - start_time + sleep_time) > total_timeout_limit:
-                 return resp # Return what we have if we can't retry
+                 if resp is not None:
+                     return resp
+                 # Should not happen here since resp is checked, but for safety
+                 raise requests.exceptions.RequestException("Server error and retry timeout reached")
             time.sleep(sleep_time)
             continue
         return resp
@@ -422,6 +420,24 @@ def extract_image_from_json(res_json, session, proxies, api_key, api_origin, tim
                         if image.mode != "RGB":
                             image = image.convert("RGB")
                         return image
+                    except Exception:
+                        pass
+                
+                # Check for text content containing markdown image with base64
+                text_content = part.get("text")
+                if text_content:
+                    try:
+                        # Regex to find markdown image with data URI: ![...](data:image/...;base64,...)
+                        match = re.search(r"!\[.*?\]\((data:image/[^;]+;base64,[a-zA-Z0-9+/=]+)\)", text_content)
+                        if match:
+                            data_uri = match.group(1)
+                            if "base64," in data_uri:
+                                b64_data = data_uri.split("base64,")[1]
+                                image_data = base64.b64decode(b64_data)
+                                image = Image.open(io.BytesIO(image_data))
+                                if image.mode != "RGB":
+                                    image = image.convert("RGB")
+                                return image
                     except Exception:
                         pass
 

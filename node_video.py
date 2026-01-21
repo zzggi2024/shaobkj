@@ -45,7 +45,7 @@ class Shaobkj_Sora_Video:
                 "分辨率": (["9:16", "16:9"], {"default": "9:16"}),
                 "长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "等待时间": ("INT", {"default": 0, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
             },
             "optional": {
