@@ -46,7 +46,7 @@ app.registerExtension({
                 // We need to manage input slots (connectors), NOT widgets, for image inputs.
                 
                 // Helper to check and add/remove slots
-                const checkSlots = () => {
+                const checkSlots = (onlyAdd = false) => {
                     if (!this.inputs) this.inputs = [];
                     
                     // Find connected status of all image slots
@@ -93,13 +93,15 @@ app.registerExtension({
                     
                     // 4. Remove extra slots (those > targetMaxNum)
                     // We iterate backwards to avoid index shifting issues when removing
-                    for (let i = this.inputs.length - 1; i >= 0; i--) {
-                        const slot = this.inputs[i];
-                        if (slot.name.startsWith("image_")) {
-                             const num = parseInt(slot.name.replace("image_", ""));
-                             if (!isNaN(num) && num > targetMaxNum) {
-                                 this.removeInput(i);
-                             }
+                    if (!onlyAdd) {
+                        for (let i = this.inputs.length - 1; i >= 0; i--) {
+                            const slot = this.inputs[i];
+                            if (slot.name.startsWith("image_")) {
+                                const num = parseInt(slot.name.replace("image_", ""));
+                                if (!isNaN(num) && num > targetMaxNum) {
+                                    this.removeInput(i);
+                                }
+                            }
                         }
                     }
                 };
@@ -111,13 +113,13 @@ app.registerExtension({
                     // Only care about input connections (type 1)
                     if (type === 1) {
                          // Use timeout to let connection settle
-                         setTimeout(checkSlots, 50);
+                         setTimeout(() => checkSlots(false), 50);
                     }
                     return r;
                 };
                 
-                // Also check on init
-                setTimeout(checkSlots, 100);
+                // Also check on init, but only add slots (safe mode)
+                setTimeout(() => checkSlots(true), 100);
 
 				return r;
 			};

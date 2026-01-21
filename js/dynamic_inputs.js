@@ -175,7 +175,7 @@ function installShaobkjTitleColorHook() {
     return false;
 }
 
-function manageInputs(node) {
+function manageInputs(node, onlyAdd = false) {
     if (!node.inputs) {
         node.inputs = [];
     }
@@ -186,7 +186,7 @@ function manageInputs(node) {
 
     const imageInputs = [];
     for (let i = 0; i < node.inputs.length; i++) {
-        if (node.inputs[i].name && node.inputs[i].name.startsWith(prefix)) {
+        if (node.inputs[i] && node.inputs[i].name && node.inputs[i].name.startsWith(prefix)) {
             imageInputs.push(node.inputs[i]);
         }
     }
@@ -219,25 +219,22 @@ function manageInputs(node) {
         }
     }
     
-    // Fix: Protect existing links from being lost during recreation
-    // Sometimes addInput/removeInput might shift indices, but LiteGraph usually handles it.
-    // However, if we are too aggressive, we might break things.
-    // The logic above only removes inputs if they are > targetCount AND have no link.
-    // So it should be safe.
-    // But let's double check if "recreate node" triggers something else.
-    // If "Recreate Node" is used, the node is destroyed and a new one created.
-    // The new node might not have inputs initially, or have default inputs.
-    // manageInputs adds them back.
-    // If links are restored by ComfyUI app, they are restored by index or name.
-    // If we change inputs async (setTimeout), link restoration might fail if slots don't exist yet.
-    // But onNodeCreated calls manageInputs immediately (in setTimeout 50ms).
-    // ComfyUI restores links after node creation.
-    // If we wait 50ms, links might try to connect to non-existent slots?
-    // Let's try to run manageInputs synchronously if possible, or very short timeout.
+    // During initialization (onlyAdd=true), we should NOT remove any inputs.
+    // This prevents deleting slots that have pending links (which haven't been restored yet).
+    if (onlyAdd) {
+        if (setupLinkWidget(node)) changed = true;
+        if (setupLongSideWidget(node)) changed = true;
+        if (setupNodeStyle(node)) changed = true;
+        if (changed) {
+            node.onResize?.(node.size);
+            node.setDirtyCanvas(true, true);
+        }
+        return;
+    }
     
     let currentMaxIndex = 0;
     if (imageInputs.length > 0) {
-        const currentInputs = node.inputs.filter(inp => inp.name.startsWith(prefix));
+        const currentInputs = node.inputs.filter(inp => inp && inp.name && inp.name.startsWith(prefix));
         currentInputs.sort((a, b) => {
              const idxA = parseInt(a.name.replace(prefix, ""));
              const idxB = parseInt(b.name.replace(prefix, ""));
@@ -256,7 +253,7 @@ function manageInputs(node) {
             
             if (inputIndex !== -1) {
                 const input = node.inputs[inputIndex];
-                if (input.link === null) {
+                if (input && input.link === null) {
                     node.removeInput(inputIndex);
                     changed = true;
                 }
@@ -419,15 +416,15 @@ app.registerExtension({
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
                 
                 // Run manageInputs immediately to ensure slots exist for link restoration
-                // But keep setTimeout for style updates just in case
-                if (needsDynamicInputs) manageInputs(this);
+                // Use onlyAdd=true to prevent removing slots during initial load
+                if (needsDynamicInputs) manageInputs(this, true);
 
                 setTimeout(() => {
                     setupNodeStyle(this);
                     setupLinkWidget(this);
                     setupLongSideWidget(this);
-                    // Check again
-                    if (needsDynamicInputs) manageInputs(this);
+                    // Check again, still onlyAdd=true to be safe during potential heavy load
+                    if (needsDynamicInputs) manageInputs(this, true);
                 }, 50);
                 
                 return r;
