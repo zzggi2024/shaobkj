@@ -331,39 +331,52 @@ class Shaobkj_APINode:
                 return return_result(pil_to_tensor(extracted_img), format_basic_api_response("成功", pil_image=extracted_img), pil_image=extracted_img)
 
             if isinstance(res_json, dict):
-                task_id = res_json.get("id") or res_json.get("task_id")
-                if not task_id and "data" in res_json and isinstance(res_json["data"], dict):
-                    task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
-            if task_id:
-                print(f"[ComfyUI-shaobkj] 任务ID: {task_id}. 开始轮询状态...")
-                poll_url = f"{url}/{task_id}"
-                poll_timeout_val = 86400 if int(等待时间) == 0 else int(等待时间)
-                start_time = time.time()
-                current_p = 70
-                fail_count = 0
-                done_statuses = {"SUCCEEDED", "SUCCESS", "COMPLETED", "FINISHED", "DONE"}
-                failed_statuses = {"FAILED", "FAIL", "ERROR", "FAILURE", "CANCELED", "CANCELLED"}
+            task_id = res_json.get("id") or res_json.get("task_id")
+            if not task_id and "data" in res_json and isinstance(res_json["data"], dict):
+                task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
+        if task_id:
+            print(f"[ComfyUI-shaobkj] 任务ID: {task_id}. 开始轮询状态...")
+            poll_url = f"{url}/{task_id}"
+            
+            # Use user-provided timeout or default to 86400 (24h) if 0
+            user_timeout = int(等待时间)
+            poll_timeout_val = 86400 if user_timeout == 0 else user_timeout
+            
+            start_time = time.time()
+            current_p = 70
+            fail_count = 0
+            done_statuses = {"SUCCEEDED", "SUCCESS", "COMPLETED", "FINISHED", "DONE"}
+            failed_statuses = {"FAILED", "FAIL", "ERROR", "FAILURE", "CANCELED", "CANCELLED"}
 
-                while True:
-                    elapsed = time.time() - start_time
-                    remaining = poll_timeout_val - elapsed
-                    if remaining <= 0:
-                        raise RuntimeError(f"图像生成超时 ({poll_timeout_val}秒)")
+            while True:
+                elapsed = time.time() - start_time
+                remaining = poll_timeout_val - elapsed
+                
+                # Force timeout check
+                if remaining <= 0:
+                    raise RuntimeError(f"图像生成超时 ({poll_timeout_val}秒)。如果需要更长等待时间，请增加'等待时间'参数。")
 
-                    time.sleep(min(5, max(0.0, remaining)))
-                    current_p = min(95, current_p + 2)
-                    pbar.update_absolute(current_p)
+                time.sleep(min(5, max(0.0, remaining)))
+                current_p = min(95, current_p + 2)
+                pbar.update_absolute(current_p)
 
-                    try:
-                        poll_req_timeout = 30 if int(等待时间) == 0 else max(1, min(30, int(remaining)))
-                        poll_resp = session.get(
-                            poll_url,
-                            headers=headers,
-                            params={"_t": int(time.time() * 1000)},
-                            verify=False,
-                            timeout=poll_req_timeout,
-                            proxies=proxies,
-                        )
+                try:
+                    # Calculate request timeout for this specific poll
+                    # If infinite wait (0), use 30s per request
+                    # If finite wait, use remaining time but clamp to [1, 30]
+                    if user_timeout == 0:
+                         poll_req_timeout = 30
+                    else:
+                         poll_req_timeout = max(1, min(30, int(remaining)))
+
+                    poll_resp = session.get(
+                        poll_url,
+                        headers=headers,
+                        params={"_t": int(time.time() * 1000)},
+                        verify=False,
+                        timeout=poll_req_timeout,
+                        proxies=proxies,
+                    )
                         fail_count = 0
                     except Exception as e:
                         fail_count += 1
