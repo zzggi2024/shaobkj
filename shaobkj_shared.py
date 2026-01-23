@@ -243,14 +243,33 @@ def post_with_retry(
             current_attempt_timeout = timeout
 
         try:
+            # Use stream=True to allow enforcing total timeout during content download
             resp = session.post(
                 url,
                 headers=headers,
                 timeout=current_attempt_timeout,
                 verify=verify,
                 proxies=proxies,
+                stream=True,
                 **request_kwargs,
             )
+            
+            # Enforce total timeout during download if limit is set
+            if total_timeout_limit is not None:
+                content_chunks = []
+                for chunk in resp.iter_content(chunk_size=4096):
+                    if time.time() - start_time > total_timeout_limit:
+                        resp.close()
+                        raise requests.exceptions.ReadTimeout(f"Total execution time exceeded limit of {total_timeout_limit}s during download")
+                    if chunk:
+                        content_chunks.append(chunk)
+                resp._content = b"".join(content_chunks)
+                resp._content_consumed = True
+            else:
+                # If no total limit, read all content to ensure consistent behavior
+                # This mimics requests' default behavior when stream=False
+                _ = resp.content
+
         except requests.exceptions.RequestException as e:
             last_exc = e
             if attempt >= max_retries:

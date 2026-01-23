@@ -412,6 +412,10 @@ class Shaobkj_APINode:
             error_msg = str(e)
             if "504" in error_msg:
                 raise RuntimeError("请求超时 (504 Gateway Time-out)。服务器处理时间过长，请稍后重试。")
+            if "Total execution time exceeded limit" in error_msg:
+                raise RuntimeError(f"等待超时 ({int(等待时间)}秒)。任务执行时间超过了设定的'等待时间'，已被强制终止。")
+            if "Expecting value: line 1 column 1" in error_msg:
+                raise RuntimeError(f"请求失败 (数据不完整)。服务器连接不稳定，接收到的数据不完整。请增加等待时间或检查网络。")
             raise RuntimeError(f"请求失败: {error_msg}")
             
         finally:
