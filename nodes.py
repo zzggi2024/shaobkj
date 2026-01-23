@@ -4,6 +4,7 @@ from .node_video import Shaobkj_Sora_Video
 from .node_veo_video import Shaobkj_Veo_Video
 from .node_concurrent_image_edit import Shaobkj_ConcurrentImageEdit, Shaobkj_ConcurrentImageEdit_Sender, Shaobkj_ConcurrentImageEdit_Receiver, Shaobkj_Load_Batch_Images
 from .node_http_transfer import Shaobkj_HTTP_Load_Image, Shaobkj_HTTP_Send_Image
+from .node_jimeng_avatar import Shaobkj_Jimeng_Avatar
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
@@ -17,6 +18,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
     "Shaobkj_HTTP_Load_Image": Shaobkj_HTTP_Load_Image,
     "Shaobkj_HTTP_Send_Image": Shaobkj_HTTP_Send_Image,
+    "Shaobkj_Jimeng_Avatar": Shaobkj_Jimeng_Avatar,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -31,6 +33,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_Load_Batch_Images": "🤖批量加载图像(路径)",
     "Shaobkj_HTTP_Load_Image": "🤖本地桥接-加载图片",
     "Shaobkj_HTTP_Send_Image": "🤖本地桥接-发送图片",
+    "Shaobkj_Jimeng_Avatar": "🤖即梦数字人（待测试）",
 }
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")

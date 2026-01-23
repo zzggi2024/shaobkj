@@ -14,6 +14,8 @@ const DYNAMIC_NODES = [
     "Shaobkj 反推",
     "Shaobkj -Sora视频",
     "Shaobkj -Veo视频",
+    "Shaobkj_ConcurrentImageEdit_Sender",
+    "🤖并发-编辑-发送端",
 ];
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
@@ -22,6 +24,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
     "Shaobkj_ConcurrentImageEdit",
+    "Shaobkj_ConcurrentImageEdit_Sender",
     "Shaobkj_HTTP_Load_Image",
     "Shaobkj_HTTP_Send_Image",
 ];
@@ -49,9 +52,11 @@ const THEME_CONFIG = {
 
     // ⚡ 极速系列 (效率与工具) - Matrix Green
     "Shaobkj_ConcurrentImageEdit": { color: "#00C853", bgcolor: "#003311" },
+    "Shaobkj_ConcurrentImageEdit_Sender": { color: "#00C853", bgcolor: "#003311" },
     "Shaobkj_Reverse_Node": { color: "#00C853", bgcolor: "#003311" },
     "🤖 Shaobkj 反推": { color: "#00C853", bgcolor: "#003311" },
     "🤖并发-图像编辑": { color: "#00C853", bgcolor: "#003311" },
+    "🤖并发-编辑-发送端": { color: "#00C853", bgcolor: "#003311" },
     "Shaobkj 反推": { color: "#00C853", bgcolor: "#003311" },
 
     // 🌐 桥接系列 (网络与传输) - Magma Orange

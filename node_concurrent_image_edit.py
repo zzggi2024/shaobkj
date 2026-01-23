@@ -88,6 +88,7 @@ def run_concurrent_task_internal(data):
         wait_time = int(data.get("wait_time", 180))
         seed_val = int(data.get("seed", 0))
         save_path_input = data.get("save_path", "")
+        save_format_input = data.get("save_format", "JPEG (默认95%)")
 
         if not api_key:
              raise ValueError("API Key is required")
@@ -196,6 +197,12 @@ def run_concurrent_task_internal(data):
         )
         response.raise_for_status()
         res_json = response.json()
+        
+        # 验证返回内容是否完整
+        if not res_json or (not res_json.get("candidates") and not res_json.get("id")):
+            print(f"[ComfyUI-shaobkj] {task_id_local}: Warning - Empty or invalid response from API. Retrying might be needed.")
+            # 可以在这里增加重试逻辑，或者直接报错
+            # 目前只打印警告，依赖外层重试或用户手动重试
 
         # Extract Result using shared helper
         extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
@@ -239,15 +246,33 @@ def run_concurrent_task_internal(data):
 
         # Save Result
         if extracted_img:
+            # Determine Format
+            save_params = {"format": "JPEG", "quality": 95}
+            ext = ".jpg"
+            
+            if save_format_input and "PNG" in save_format_input:
+                save_params = {"format": "PNG"}
+                ext = ".png"
+            elif save_format_input and "WEBP" in save_format_input:
+                save_params = {"format": "WEBP", "lossless": True}
+                ext = ".webp"
+
             # Determine Filename
             custom_filename = data.get("output_filename")
             if custom_filename:
                 # Clean up path to get just basename without extension
                 base_name = os.path.splitext(os.path.basename(str(custom_filename)))[0]
-                # Keep extension as jpg since we save as JPEG
-                filename = f"{base_name}.jpg"
+                # Check if file already exists, and append suffix if needed to avoid overwrite
+                # BUT user says "文件名不对", which implies they want the EXACT name from the list.
+                # However, if multiple tasks map to same filename (e.g. batching logic error), they overwrite.
+                
+                # The issue "文件名不对" usually means the filename passed down is wrong or has unexpected chars.
+                # In batch mode, we pass specific filename from list.
+                # Let's ensure we are using the one passed in `data`.
+                
+                filename = f"{base_name}{ext}"
             else:
-                filename = f"concurrent_edit_{int(time.time())}_{random.randint(1000,9999)}.jpg"
+                filename = f"concurrent_edit_{int(time.time())}_{random.randint(1000,9999)}{ext}"
             
             # Determine output directory
             out_dir = folder_paths.get_output_directory()
@@ -265,7 +290,18 @@ def run_concurrent_task_internal(data):
 
             out_path = os.path.join(out_dir, filename)
             
-            extracted_img.save(out_path, format="JPEG", quality=95)
+            # Check for overwrite and append suffix if needed
+            counter = 1
+            original_out_path = out_path
+            original_base_name = os.path.splitext(filename)[0]
+            
+            while os.path.exists(out_path):
+                new_filename = f"{original_base_name}_{counter}{ext}"
+                out_path = os.path.join(out_dir, new_filename)
+                filename = new_filename # Update filename variable for logging/return
+                counter += 1
+            
+            extracted_img.save(out_path, **save_params)
             
             print(f"[ComfyUI-shaobkj] {task_id_local}: Success! Saved to {out_path}")
             
@@ -356,10 +392,12 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
-                "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000}),
+                "等待时间": ("INT", {"default": 900, "min": 0, "max": 1000000}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
-                "Batch拆分模式": ("BOOLEAN", {"default": False}),
+                "Batch拆分模式": ("BOOLEAN", {"default": True}),
                 "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)"}),
+                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交之间的间隔时间(秒)"}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
                 "保存路径": ("STRING", {"default": "", "multiline": False, "placeholder": "默认为 output 目录"}),
             },
             "optional": {
@@ -415,10 +453,12 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             clean_kwargs[k] = v
 
         long_side_val = int(get_val(kwargs.get("输入图像-长边设置", [1280])))
-        wait_time_val = int(get_val(kwargs.get("等待时间", [180])))
+        wait_time_val = int(get_val(kwargs.get("等待时间", [900])))
         seed_val = int(get_val(kwargs.get("seed", [0])))
-        batch_split_val = get_val(kwargs.get("Batch拆分模式", [False]))
+        batch_split_val = get_val(kwargs.get("Batch拆分模式", [True]))
         batch_align_val = get_val(kwargs.get("Batch对齐方式", ["循环补全(Max)"]))
+        submit_interval_val = float(get_val(kwargs.get("并发间隔", [1.0])))
+        save_format_val = get_val(kwargs.get("保存格式", ["JPEG (默认95%)"]))
         filename_source_val = kwargs.get("文件名来源", None) # Keep as list
         
         # 0. Pre-check
@@ -441,7 +481,8 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             "long_side": long_side_val,
             "wait_time": wait_time_val,
             "seed": seed_val,
-            "save_path": save_path_val
+            "save_path": save_path_val,
+            "save_format": save_format_val
         }
 
         # Helper to normalize inputs to a flat list of tensors
@@ -626,6 +667,10 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 t.start()
                 
                 generated_ids.append(sub_task_id)
+
+                # Delay between submissions to avoid congestion
+                if submit_interval_val > 0 and i < final_batch_size - 1:
+                    time.sleep(submit_interval_val)
             
             # Return list of IDs (Since INPUT_IS_LIST=True, output should be list)
             status_list = [f"已提交: {gid} | {ui_summary}" for gid in generated_ids]
