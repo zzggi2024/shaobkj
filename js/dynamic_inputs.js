@@ -181,104 +181,115 @@ function installShaobkjTitleColorHook() {
 }
 
 function manageInputs(node, onlyAdd = false) {
-    if (!node.inputs) {
-        node.inputs = [];
-    }
-
-    let changed = false;
-
-    const { prefix, slotType } = getDynamicInputSpec(node);
-
-    const imageInputs = [];
-    for (let i = 0; i < node.inputs.length; i++) {
-        if (node.inputs[i] && node.inputs[i].name && node.inputs[i].name.startsWith(prefix)) {
-            imageInputs.push(node.inputs[i]);
+    try {
+        if (!node.inputs) {
+            node.inputs = [];
         }
-    }
 
-    imageInputs.sort((a, b) => {
-        const idxA = parseInt(a.name.replace(prefix, ""));
-        const idxB = parseInt(b.name.replace(prefix, ""));
-        return idxA - idxB;
-    });
+        let changed = false;
+        const spec = getDynamicInputSpec(node);
+        if (!spec) return;
+        const { prefix, slotType } = spec;
 
-    let highestConnectedIndex = 0;
-    for (const input of imageInputs) {
-        const idx = parseInt(input.name.replace(prefix, ""));
-        if (input.link !== null && input.link !== undefined && input.link !== -1) {
-            if (idx > highestConnectedIndex) {
-                highestConnectedIndex = idx;
+        const imageInputs = [];
+        for (let i = 0; i < node.inputs.length; i++) {
+            const inp = node.inputs[i];
+            if (inp && inp.name && (inp.name.startsWith(prefix) || (prefix && inp.name.indexOf(prefix) === 0))) {
+                imageInputs.push(inp);
             }
         }
-    }
 
-    let targetCount = Math.max(highestConnectedIndex + 1, MIN_INPUTS);
-    
-    for (let i = 1; i <= targetCount; i++) {
-        const name = `${prefix}${i}`;
-        const existingIndex = node.findInputSlot ? node.findInputSlot(name) : -1;
+        imageInputs.sort((a, b) => {
+            const nameA = String(a.name || "");
+            const nameB = String(b.name || "");
+            const idxA = parseInt(String(nameA).replace(prefix, "") || "0");
+            const idxB = parseInt(String(nameB).replace(prefix, "") || "0");
+            return idxA - idxB;
+        });
+
+        let highestConnectedIndex = 0;
+        for (const input of imageInputs) {
+            const name = String(input.name || "");
+            const idx = parseInt(String(name).replace(prefix, "") || "0");
+            if (input.link !== null && input.link !== undefined && input.link !== -1) {
+                if (idx > highestConnectedIndex) {
+                    highestConnectedIndex = idx;
+                }
+            }
+        }
+
+        let targetCount = Math.max(highestConnectedIndex + 1, MIN_INPUTS);
         
-        if (existingIndex === -1) {
-            node.addInput(name, slotType);
+        for (let i = 1; i <= targetCount; i++) {
+            const name = `${prefix}${i}`;
+            const existingIndex = node.findInputSlot ? node.findInputSlot(name) : -1;
+            
+            if (existingIndex === -1) {
+                node.addInput(name, slotType);
+                changed = true;
+            }
+        }
+        
+        // During initialization (onlyAdd=true), we should NOT remove any inputs.
+        if (onlyAdd) {
+            if (setupLinkWidget(node)) changed = true;
+            if (setupLongSideWidget(node)) changed = true;
+            if (setupNodeStyle(node)) changed = true;
+            if (changed) {
+                node.onResize?.(node.size);
+                node.setDirtyCanvas(true, true);
+            }
+            return;
+        }
+        
+        let currentMaxIndex = 0;
+        if (imageInputs.length > 0) {
+            const currentInputs = node.inputs.filter(inp => inp && inp.name && inp.name.startsWith(prefix));
+            currentInputs.sort((a, b) => {
+                 const nameA = String(a.name || "");
+                 const nameB = String(b.name || "");
+                 const idxA = parseInt(String(nameA).replace(prefix, "") || "0");
+                 const idxB = parseInt(String(nameB).replace(prefix, "") || "0");
+                 return idxA - idxB;
+            });
+            
+            if (currentInputs.length > 0) {
+                const lastName = String(currentInputs[currentInputs.length - 1].name || "");
+                currentMaxIndex = parseInt(String(lastName).replace(prefix, "") || "0");
+            }
+        }
+
+        if (currentMaxIndex > targetCount) {
+            for (let i = currentMaxIndex; i > targetCount; i--) {
+                const name = `${prefix}${i}`;
+                const inputIndex = node.findInputSlot ? node.findInputSlot(name) : -1;
+                
+                if (inputIndex !== -1) {
+                    const input = node.inputs[inputIndex];
+                    if (input && input.link === null) {
+                        node.removeInput(inputIndex);
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        if (setupLinkWidget(node)) {
             changed = true;
         }
-    }
-    
-    // During initialization (onlyAdd=true), we should NOT remove any inputs.
-    // This prevents deleting slots that have pending links (which haven't been restored yet).
-    if (onlyAdd) {
-        if (setupLinkWidget(node)) changed = true;
-        if (setupLongSideWidget(node)) changed = true;
-        if (setupNodeStyle(node)) changed = true;
+
+        if (setupLongSideWidget(node)) {
+            changed = true;
+        }
+        if (setupNodeStyle(node)) {
+            changed = true;
+        }
         if (changed) {
             node.onResize?.(node.size);
             node.setDirtyCanvas(true, true);
         }
-        return;
-    }
-    
-    let currentMaxIndex = 0;
-    if (imageInputs.length > 0) {
-        const currentInputs = node.inputs.filter(inp => inp && inp.name && inp.name.startsWith(prefix));
-        currentInputs.sort((a, b) => {
-             const idxA = parseInt(a.name.replace(prefix, ""));
-             const idxB = parseInt(b.name.replace(prefix, ""));
-             return idxA - idxB;
-        });
-        
-        if (currentInputs.length > 0) {
-            currentMaxIndex = parseInt(currentInputs[currentInputs.length - 1].name.replace(prefix, ""));
-        }
-    }
-
-    if (currentMaxIndex > targetCount) {
-        for (let i = currentMaxIndex; i > targetCount; i--) {
-            const name = `${prefix}${i}`;
-            const inputIndex = node.findInputSlot ? node.findInputSlot(name) : -1;
-            
-            if (inputIndex !== -1) {
-                const input = node.inputs[inputIndex];
-                if (input && input.link === null) {
-                    node.removeInput(inputIndex);
-                    changed = true;
-                }
-            }
-        }
-    }
-
-    if (setupLinkWidget(node)) {
-        changed = true;
-    }
-
-    if (setupLongSideWidget(node)) {
-        changed = true;
-    }
-    if (setupNodeStyle(node)) {
-        changed = true;
-    }
-    if (changed) {
-        node.onResize?.(node.size);
-        node.setDirtyCanvas(true, true);
+    } catch (e) {
+        console.error("[Shaobkj] Error in manageInputs:", e);
     }
 }
 

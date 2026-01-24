@@ -198,12 +198,11 @@ def run_concurrent_task_internal(data):
         response.raise_for_status()
         res_json = response.json()
         
-        # 验证返回内容是否完整
-        if not res_json or (not res_json.get("candidates") and not res_json.get("id")):
+        # Verify response content
+        if not res_json or (not res_json.get("candidates") and not res_json.get("id") and not res_json.get("name")):
+            # Some Google APIs return 'name' for long running operations
             print(f"[ComfyUI-shaobkj] {task_id_local}: Warning - Empty or invalid response from API. Retrying might be needed.")
-            # 可以在这里增加重试逻辑，或者直接报错
-            # 目前只打印警告，依赖外层重试或用户手动重试
-
+            
         # Extract Result using shared helper
         extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
         
@@ -211,6 +210,9 @@ def run_concurrent_task_internal(data):
         
         if not extracted_img:
              remote_task_id = res_json.get("id") or res_json.get("task_id")
+             if not remote_task_id and "name" in res_json:
+                 # Operation name as ID
+                 remote_task_id = res_json["name"]
              if not remote_task_id and "data" in res_json:
                  remote_task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
              
@@ -342,7 +344,8 @@ def run_concurrent_task_internal(data):
         })
 
         traceback.print_exc()
-        PromptServer.instance.send_sync("shaobkj.concurrent.error", {"task_id": task_id_local, "error": err_msg})
+        # Suppress popup error to avoid interrupting batch workflow
+        # PromptServer.instance.send_sync("shaobkj.concurrent.error", {"task_id": task_id_local, "error": err_msg})
 
 
 # ----------------------------------------------------------------------------
@@ -415,7 +418,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     INPUT_IS_LIST = True
 
     RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("任务ID", "状态")
+    RETURN_NAMES = ("API响应", "状态")
     FUNCTION = "submit_task"
     CATEGORY = "🤖shaobkj-APIbox/Concurrent"
     OUTPUT_NODE = True
@@ -515,6 +518,9 @@ class Shaobkj_ConcurrentImageEdit_Sender:
         # With INPUT_IS_LIST=True, "Legacy Mode" (Single Request) means:
         # Take ALL images from ALL inputs and put them into ONE request.
         
+        # Check if we should wait for result
+        # Sending task is async, but we need to ensure the worker starts properly
+        
         if not batch_split_val:
             # --- Legacy Mode: All images in one request ---
             data = base_data.copy()
@@ -539,14 +545,11 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             # Flatten filename list if present
             f_list = []
             if filename_source_val:
+                # raw_list = normalize_list_input(filename_source_val) # Reverted to simple handling
                 if isinstance(filename_source_val, list):
-                    for f in filename_source_val:
-                        if isinstance(f, str) and "\n" in f:
-                            f_list.extend(f.split("\n"))
-                        else:
-                            f_list.append(str(f))
-                elif isinstance(filename_source_val, str):
-                    f_list.append(filename_source_val)
+                     f_list = [str(x) for x in filename_source_val]
+                else:
+                     f_list = [str(filename_source_val)]
             
             if f_list:
                 data["output_filename"] = f_list[0]
@@ -688,138 +691,10 @@ class Shaobkj_ConcurrentImageEdit_Sender:
 
 
 # ----------------------------------------------------------------------------
-# Node B: Receiver (Async)
+# Node B: Receiver (Removed)
 # ----------------------------------------------------------------------------
+# Class Shaobkj_ConcurrentImageEdit_Receiver has been removed as per request.
 
-class Shaobkj_ConcurrentImageEdit_Receiver:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                 "任务ID": ("STRING", {"multiline": False, "default": "", "placeholder": "连接发送端输出或留空自动获取"}),
-                 "阻塞等待结果": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭"}),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("图像", "状态")
-    FUNCTION = "receive_result"
-    CATEGORY = "🤖shaobkj-APIbox/Concurrent"
-
-    def receive_result(self, 任务ID="", 阻塞等待结果=True):
-        # Safeguard: Handle list input if batching doesn't unwrap
-        # With INPUT_IS_LIST=True in Sender, Sender outputs a list of IDs.
-        # But Receiver does NOT have INPUT_IS_LIST=True.
-        # So ComfyUI should iterate Receiver for each ID in the list.
-        # However, if the list is empty or something weird happens...
-        
-        target_id_input = 任务ID
-        if isinstance(target_id_input, list):
-             if len(target_id_input) > 0:
-                 target_id_input = target_id_input[0]
-             else:
-                 target_id_input = ""
-        
-        # Retry loop for blocking mode
-        timeout = 300 # 5 minutes max wait for blocking
-        start_time = time.time()
-        
-        while True:
-            tasks = get_all_async_tasks()
-            target_task = None
-            target_id = None
-            is_running = False
-
-            # 1. If ID provided, check specific task
-            if target_id_input:
-                if target_id_input in tasks:
-                    t = tasks[target_id_input]
-                    status = t.get("status")
-                    if status == "success" and not t.get("downloaded"):
-                        target_task = t
-                        target_id = target_id_input
-                    elif status == "running":
-                        is_running = True
-                    elif status == "success":
-                         # Already downloaded?
-                         # If we are in a batch run, maybe we are re-checking?
-                         # But we want to return the image anyway if we have the ID.
-                         # Wait, logic below says "and not t.get('downloaded')".
-                         # If it's already downloaded, we skip it?
-                         # If I provide a specific ID, I want that result, even if downloaded before!
-                         # The "downloaded" flag is mainly for the "Auto Pick Oldest" mode.
-                         target_task = t
-                         target_id = target_id_input
-                else:
-                    # Task ID might not be written to JSON yet if Sender just spawned it?
-                    # Sender writes "running" immediately.
-                    pass
-            
-            # 2. If no ID or not ready, find oldest successful task (Only if ID not provided)
-            # If ID IS provided, we only care about that ID.
-            if not target_task and not target_id_input:
-                # Sort by submitted_at
-                sorted_tasks = sorted(tasks.items(), key=lambda x: x[1].get("submitted_at", 0))
-                for tid, t in sorted_tasks:
-                    if t.get("status") == "success" and not t.get("downloaded"):
-                        target_task = t
-                        target_id = tid
-                        break
-            
-            # 3. Decision
-            if target_task:
-                # Found result! Break loop and process.
-                break
-            
-            if 阻塞等待结果 and target_id_input and is_running:
-                # If we are blocking, have a specific ID, and it's running -> Wait.
-                if time.time() - start_time > timeout:
-                    return (torch.zeros((1, 512, 512, 3), dtype=torch.float32), f"等待超时: {target_id_input}")
-                time.sleep(1)
-                continue
-            elif 阻塞等待结果 and target_id_input and not target_task:
-                 # ID provided, but task not found or failed?
-                 # Maybe it's just starting up?
-                 if time.time() - start_time < 5:
-                     time.sleep(1)
-                     continue
-                 return (torch.zeros((1, 512, 512, 3), dtype=torch.float32), f"未找到任务: {target_id_input}")
-            else:
-                # Not blocking, or not running (failed?), or no ID provided and no results ready.
-                # Return empty.
-                empty_img = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
-                status_msg = "等待中: 任务运行中" if is_running else "等待中: 无可用结果"
-                return (empty_img, status_msg)
-
-        # 4. Load Image (Target Found)
-        image_path = target_task.get("image_path")
-        if not image_path or not os.path.exists(image_path):
-             return (torch.zeros((1, 512, 512, 3), dtype=torch.float32), f"错误: 文件丢失 {target_id}")
-
-        try:
-            img = Image.open(image_path)
-            img = ImageOps.exif_transpose(img)
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            
-            # Convert to Tensor
-            img_np = np.array(img).astype(np.float32) / 255.0
-            img_tensor = torch.from_numpy(img_np)[None,]
-            
-            # Mark as downloaded ONLY if we auto-picked it.
-            # If user provided ID, we shouldn't mark it as "consumed" for others?
-            # Or we should?
-            # If we mark it downloaded, next auto-pick won't get it. That's good.
-            update_async_task(target_id, {"downloaded": True})
-            
-            return (img_tensor, f"已获取: {target_id}")
-            
-        except Exception as e:
-            print(f"[Shaobkj-Receiver] Error loading image: {e}")
-            return (torch.zeros((1, 512, 512, 3), dtype=torch.float32), f"加载失败: {e}")
 
 # ----------------------------------------------------------------------------
 # Node C: Load Batch Images From Path
