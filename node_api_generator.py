@@ -535,7 +535,7 @@ class Shaobkj_APINode_Batch:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "提示词列表": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": "一只猫\n一只狗", "placeholder": "每行一个提示词，或者拖入CSV/Excel文件路径"}),
+                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True}),
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
                 "模型选择": (["gemini-3-pro-image-preview"], {"default": "gemini-3-pro-image-preview"}),
@@ -546,9 +546,13 @@ class Shaobkj_APINode_Batch:
                     {"default": "Free"},
                 ),
                 "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
-                "并发数": ("INT", {"default": 0, "min": 0, "max": 10, "step": 1, "tooltip": "0=智能并发（按任务数自动扩展，上限10）"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
-                "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
+                "Batch拆分模式": ("BOOLEAN", {"default": True}),
+                "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)"}),
+                "保存路径": ("STRING", {"default": "Shaobkj_Concurrent", "multiline": False}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
+                "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数"}),
+                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交之间的间隔时间(秒)"}),
             },
             "optional": {
                 "文件列名": ("STRING", {"default": "prompt", "multiline": False, "tooltip": "CSV/Excel中提示词所在的列名"}),
@@ -560,7 +564,7 @@ class Shaobkj_APINode_Batch:
     FUNCTION = "generate_images_batch"
     CATEGORY = "🤖shaobkj-APIbox"
 
-    def generate_images_batch(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词列表, 图片比例, 等待时间, 并发数, seed, 文件列名="prompt", **kwargs):
+    def generate_images_batch(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 等待时间, seed, Batch拆分模式, Batch对齐方式, 保存路径, 保存格式, 最大并发数, 并发间隔, 文件列名="prompt", **kwargs):
         api_key = API密钥
         base_origin = str(API地址).rstrip("/")
         gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
@@ -569,6 +573,10 @@ class Shaobkj_APINode_Batch:
         resolution = 分辨率
         aspect_ratio = 图片比例
         timeout_val = None if int(等待时间) == 0 else int(等待时间)
+        
+        # Legacy mapping for logic compatibility
+        并发数 = 最大并发数 
+        提示词列表 = 提示词
 
         if not api_key:
             raise ValueError("API Key is required.")

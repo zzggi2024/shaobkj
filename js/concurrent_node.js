@@ -4,7 +4,7 @@ import { api } from "../../scripts/api.js";
 app.registerExtension({
 	name: "Shaobkj.ConcurrentImageEdit",
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
-		if (nodeData.name === "Shaobkj_ConcurrentImageEdit_Sender") {
+		if (nodeData.name === "Shaobkj_ConcurrentImageEdit_Sender" || nodeData.name === "Shaobkj_APINode_Batch") {
 			
             // Add a button widget
             const onNodeCreated = nodeType.prototype.onNodeCreated;
