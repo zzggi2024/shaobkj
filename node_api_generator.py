@@ -4,7 +4,6 @@ import torch
 import numpy as np
 from PIL import Image
 import io
-import folder_paths
 import base64
 import re
 import random
@@ -17,15 +16,13 @@ import pandas as pd
 import torch.nn.functional as F
 
 from .shaobkj_shared import (
-    auth_headers_for_same_origin,
     build_submit_timeout,
     create_requests_session,
     disable_insecure_request_warnings,
+    extract_image_from_json,
     get_config_value,
     pil_to_tensor,
     post_json_with_retry,
-    extract_image_from_json,
-    smart_pad_images_to_tensor,
 )
 from comfy.utils import ProgressBar
 
@@ -167,7 +164,8 @@ class Shaobkj_APINode:
     def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 等待时间, seed, **kwargs):
         api_key = API密钥
         base_origin = str(API地址).rstrip("/")
-        api_origin = urlparse(base_origin).netloc
+        gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
+        api_origin = urlparse(gemini_base).netloc
         resolution = 分辨率
         prompt = 提示词
         aspect_ratio = 图片比例
@@ -182,9 +180,9 @@ class Shaobkj_APINode:
 
         model = 模型选择
 
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key, "Authorization": f"Bearer {api_key}"}
 
-        url = f"{base_origin}/v1beta/models/{model}:generateContent"
+        url = f"{gemini_base}/v1beta/models/{model}:generateContent"
 
         # Force image generation by appending instruction
         final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
@@ -201,11 +199,13 @@ class Shaobkj_APINode:
         
         first_image_ratio = None
         
+        image_b64_list = []
         for idx, (name, tensor) in enumerate(image_inputs):
             b64_str, ratio = self.resize_and_encode_image(tensor, long_side_limit)
             if idx == 0:
                 first_image_ratio = ratio
             if b64_str:
+                image_b64_list.append(b64_str)
                 parts.append({
                     "inline_data": {
                         "mime_type": "image/jpeg",
@@ -266,7 +266,10 @@ class Shaobkj_APINode:
 
         disable_insecure_request_warnings()
         session, proxies = create_requests_session(bool(使用系统代理))
-        submit_timeout = build_submit_timeout(int(等待时间))
+        wait_seconds = int(等待时间)
+        submit_timeout = build_submit_timeout(wait_seconds)
+        if wait_seconds > 0:
+            submit_timeout = (min(10, wait_seconds), max(wait_seconds, 120))
 
         # ---------------------------------------------------------
         # Progress Bar Simulator Logic
@@ -298,6 +301,47 @@ class Shaobkj_APINode:
         t_progress.daemon = True # Ensure it dies if main thread dies
         t_progress.start()
 
+        def try_openai_fallback():
+            openai_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
+            openai_url = f"{openai_base}/v1/chat/completions"
+            openai_headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+            openai_content = [{"type": "text", "text": final_prompt}]
+            for b64_str in image_b64_list:
+                openai_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_str}"}})
+            openai_payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": openai_content}],
+                "temperature": temperature,
+                "seed": safe_seed,
+            }
+            openai_resp = post_json_with_retry(
+                session,
+                openai_url,
+                headers=openai_headers,
+                payload=openai_payload,
+                timeout=submit_timeout,
+                proxies=proxies,
+                verify=False,
+            )
+            openai_resp.raise_for_status()
+            try:
+                openai_json = openai_resp.json()
+            except json.JSONDecodeError:
+                return None
+            return extract_image_from_json(openai_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+        
+        def get_task_id_from_headers(resp):
+            headers_map = getattr(resp, "headers", {}) or {}
+            task_id_local = headers_map.get("X-Task-Id") or headers_map.get("Task-Id") or headers_map.get("task_id") or headers_map.get("task-id")
+            if task_id_local:
+                return task_id_local
+            location = headers_map.get("Location") or headers_map.get("location")
+            if isinstance(location, str) and location:
+                m = re.search(r"/([^/]+)/?$", location.strip())
+                if m:
+                    return m.group(1)
+            return None
+
         try:
             response = post_json_with_retry(
                 session,
@@ -309,6 +353,22 @@ class Shaobkj_APINode:
                 verify=False,
             )
             # pbar.update_absolute(50) # Removed static update
+
+            if response.status_code == 524:
+                print(f"[ComfyUI-shaobkj] Warning: 524 Gateway Timeout, try OpenAI fallback")
+                fallback_img = try_openai_fallback()
+                if fallback_img:
+                    return return_result(pil_to_tensor(fallback_img), format_basic_api_response("成功", pil_image=fallback_img), pil_image=fallback_img)
+                print(f"[ComfyUI-shaobkj] Warning: 524 retry once")
+                response = post_json_with_retry(
+                    session,
+                    url,
+                    headers=headers,
+                    payload=payload,
+                    timeout=submit_timeout,
+                    proxies=proxies,
+                    verify=False,
+                )
 
             if response.status_code not in (200, 201, 202):
                 print(f"[ComfyUI-shaobkj] API Error Status: {response.status_code}")
@@ -323,17 +383,43 @@ class Shaobkj_APINode:
                     print(f"[ComfyUI-shaobkj] API Error Body: {response.text}")
 
             response.raise_for_status()
-            res_json = response.json()
+            
+            try:
+                res_json = response.json()
+            except (json.JSONDecodeError, ValueError) as e:
+                # Handle empty or malformed JSON
+                raw_text = response.text
+                if not raw_text or not raw_text.strip():
+                     print(f"[ComfyUI-shaobkj] Warning: API returned empty response body (HTTP {response.status_code}), try OpenAI fallback")
+                     task_id = get_task_id_from_headers(response)
+                     if task_id:
+                         res_json = {}
+                     else:
+                         fallback_img = try_openai_fallback()
+                         if fallback_img:
+                             return return_result(pil_to_tensor(fallback_img), format_basic_api_response("成功", pil_image=fallback_img), pil_image=fallback_img)
+                         raise RuntimeError(f"API Error: Empty response body (HTTP {response.status_code})")
+                else:
+                     print(f"[ComfyUI-shaobkj] JSON Decode Error: {e}")
+                     print(f"[ComfyUI-shaobkj] Response Content (first 500 chars): {raw_text[:500]}")
+                     fallback_img = try_openai_fallback()
+                     if fallback_img:
+                         return return_result(pil_to_tensor(fallback_img), format_basic_api_response("成功", pil_image=fallback_img), pil_image=fallback_img)
+                     raise RuntimeError(f"Invalid JSON response from API: {e}")
+
             pbar.update_absolute(70)
 
-            extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
-            if extracted_img:
-                return return_result(pil_to_tensor(extracted_img), format_basic_api_response("成功", pil_image=extracted_img), pil_image=extracted_img)
+            if isinstance(res_json, dict):
+                extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+                if extracted_img:
+                    return return_result(pil_to_tensor(extracted_img), format_basic_api_response("成功", pil_image=extracted_img), pil_image=extracted_img)
 
             if isinstance(res_json, dict):
                 task_id = res_json.get("id") or res_json.get("task_id")
                 if not task_id and "data" in res_json and isinstance(res_json["data"], dict):
                     task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
+            if not task_id:
+                task_id = get_task_id_from_headers(response)
             if task_id:
                 print(f"[ComfyUI-shaobkj] 任务ID: {task_id}. 开始轮询状态...")
                 poll_url = f"{url}/{task_id}"
@@ -345,6 +431,7 @@ class Shaobkj_APINode:
                 start_time = time.time()
                 current_p = 70
                 fail_count = 0
+                poll_attempts = 0
                 done_statuses = {"SUCCEEDED", "SUCCESS", "COMPLETED", "FINISHED", "DONE"}
                 failed_statuses = {"FAILED", "FAIL", "ERROR", "FAILURE", "CANCELED", "CANCELLED"}
 
@@ -356,8 +443,23 @@ class Shaobkj_APINode:
                     if remaining <= 0:
                         raise RuntimeError(f"图像生成超时 ({poll_timeout_val}秒)。如果需要更长等待时间，请增加'等待时间'参数。")
 
-                    time.sleep(min(5, max(0.0, remaining)))
-                    current_p = min(95, current_p + 2)
+                    # Adaptive polling interval: 
+                    # First 5 attempts: 1s (fast check for quick tasks)
+                    # Next 10 attempts: 2s
+                    # Afterwards: 3s
+                    if poll_attempts < 5:
+                        sleep_time = 1.0
+                    elif poll_attempts < 15:
+                        sleep_time = 2.0
+                    else:
+                        sleep_time = 3.0
+                    
+                    # Ensure we don't sleep longer than remaining time
+                    sleep_time = min(sleep_time, max(0.0, remaining))
+                    time.sleep(sleep_time)
+                    
+                    poll_attempts += 1
+                    current_p = min(95, current_p + 1) # Slow down progress bar update
                     pbar.update_absolute(current_p)
 
                     try:
@@ -387,7 +489,15 @@ class Shaobkj_APINode:
                     if poll_resp.status_code != 200:
                         continue
 
-                    poll_json = poll_resp.json()
+                    try:
+                        poll_json = poll_resp.json()
+                    except json.JSONDecodeError:
+                        # Handle invalid JSON in polling response (e.g. empty body or html error)
+                        # We just continue polling, assuming it's a transient issue
+                        # Only print warning if it happens repeatedly or verbose logging is needed
+                        # print(f"[ComfyUI-shaobkj] Warning: Polling response invalid JSON (Attempt {poll_attempts})")
+                        continue
+
                     extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
                     if extracted_img:
                         return return_result(pil_to_tensor(extracted_img), format_basic_api_response("成功", pil_image=extracted_img), pil_image=extracted_img)
@@ -403,6 +513,9 @@ class Shaobkj_APINode:
                     if status_str in done_statuses:
                         raise RuntimeError(f"任务已完成但未找到图像: {sanitize_text(json.dumps(poll_json, ensure_ascii=False))}")
 
+            fallback_img = try_openai_fallback()
+            if fallback_img:
+                return return_result(pil_to_tensor(fallback_img), format_basic_api_response("成功", pil_image=fallback_img), pil_image=fallback_img)
             raise RuntimeError(f"No image found in API response. Response: {sanitize_text(json.dumps(res_json, ensure_ascii=False))}")
         except Exception as e:
             # Stop progress thread on error
@@ -463,7 +576,8 @@ class Shaobkj_APINode_Batch:
     def generate_images_batch(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词列表, 图片比例, 等待时间, 并发数, seed, 文件列名="prompt", **kwargs):
         api_key = API密钥
         base_origin = str(API地址).rstrip("/")
-        api_origin = urlparse(base_origin).netloc
+        gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
+        api_origin = urlparse(gemini_base).netloc
         model = 模型选择
         resolution = 分辨率
         aspect_ratio = 图片比例
@@ -503,8 +617,14 @@ class Shaobkj_APINode_Batch:
 
         disable_insecure_request_warnings()
 
-        base_headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
-        url = f"{base_origin}/v1beta/models/{model}:generateContent"
+        # Support both Google and OpenAI-compatible auth headers
+        base_headers = {
+            "Content-Type": "application/json", 
+            "x-goog-api-key": api_key,
+            "Authorization": f"Bearer {api_key}"
+        }
+        
+        url = f"{gemini_base}/v1beta/models/{model}:generateContent"
         submit_timeout = build_submit_timeout(int(等待时间))
         session, proxies = create_requests_session(bool(使用系统代理))
 
@@ -571,13 +691,17 @@ class Shaobkj_APINode_Batch:
                 return obj.get("message") or obj.get("msg") or obj.get("error_message") or obj.get("detail")
             return None
 
-        def sanitize_text(s, max_len=600):
-            t = "" if s is None else str(s)
-            t = re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "data:image/...;base64,[省略]", t)
-            t = re.sub(r"[A-Za-z0-9+/=]{200,}", "[省略]", t)
-            if len(t) > max_len:
-                t = t[:max_len] + "...(省略)"
-            return t
+        def get_task_id_from_headers(resp):
+            headers_map = getattr(resp, "headers", {}) or {}
+            task_id_local = headers_map.get("X-Task-Id") or headers_map.get("Task-Id") or headers_map.get("task_id") or headers_map.get("task-id")
+            if task_id_local:
+                return task_id_local
+            location = headers_map.get("Location") or headers_map.get("location")
+            if isinstance(location, str) and location:
+                m = re.search(r"/([^/]+)/?$", location.strip())
+                if m:
+                    return m.group(1)
+            return None
 
         def generate_one(index, prompt):
             local_seed = normalize_seed(int(seed) + int(index))
@@ -602,14 +726,24 @@ class Shaobkj_APINode_Batch:
                 verify=False,
             )
             response.raise_for_status()
-            res_json = response.json()
+            task_id = None
+            try:
+                res_json = response.json()
+            except (json.JSONDecodeError, ValueError) as e:
+                raw_text = response.text
+                if not raw_text or not raw_text.strip():
+                    task_id = get_task_id_from_headers(response)
+                    res_json = {}
+                else:
+                    raise RuntimeError(f"Invalid JSON response from API: {e}")
 
             extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
             if extracted_img:
                 return (pil_to_tensor(extracted_img), format_basic_api_response("成功", local_seed, pil_image=extracted_img, task_id=task_id))
 
             if isinstance(res_json, dict):
-                task_id = res_json.get("id") or res_json.get("task_id")
+                if task_id is None:
+                    task_id = res_json.get("id") or res_json.get("task_id")
                 if not task_id and "data" in res_json and isinstance(res_json["data"], dict):
                     task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
             if not task_id:

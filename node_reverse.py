@@ -151,7 +151,7 @@ class Shaobkj_Reverse_Node:
         if 谷歌搜索:
             payload["tools"] = [{"googleSearch": {}}]
 
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key, "Authorization": f"Bearer {api_key}"}
 
         print(f"[ComfyUI-shaobkj] Sending inference request to {base_url} (Model: {model})...")
         pbar = ProgressBar(100)
@@ -180,7 +180,13 @@ class Shaobkj_Reverse_Node:
                     err_msg = response.text
                 raise_if_quota_error(response.status_code, err_msg)
 
-            res_json = response.json()
+            try:
+                res_json = response.json()
+            except (json.JSONDecodeError, ValueError) as e:
+                raw_text = response.text
+                if not raw_text or not raw_text.strip():
+                    raise RuntimeError(f"API Error: Empty response body (HTTP {response.status_code})")
+                raise RuntimeError(f"Invalid JSON response from API: {e}")
             pbar.update_absolute(60)
 
             generated_text = ""
