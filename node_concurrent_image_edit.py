@@ -244,24 +244,7 @@ def run_concurrent_task_internal(data):
             verify=False
         )
 
-        if response.status_code == 524:
-            print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: Warning: 524 Gateway Timeout, try OpenAI fallback")
-            fallback_img = try_openai_fallback()
-            if fallback_img:
-                extracted_img = fallback_img
-                # Skip to saving
-                res_json = {"status": "success", "fallback": True} 
-            else:
-                print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: Warning: 524 retry once")
-                response = post_json_with_retry(
-                    session,
-                    url,
-                    headers=headers,
-                    payload=payload,
-                    timeout=submit_timeout,
-                    proxies=proxies,
-                    verify=False
-                )
+
         
         if response.status_code not in (200, 201, 202):
             print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: API Error Status: {response.status_code}")
@@ -427,6 +410,12 @@ def run_concurrent_task_internal(data):
              err_msg = "❌ 错误：API 配额耗尽或请求过于频繁 (429 Too Many Requests)。"
         elif "500" in err_msg or "Internal Server Error" in err_msg:
              err_msg = "❌ 错误：API 服务端内部错误 (500 Internal Server Error)。"
+        elif "504" in err_msg or "Gateway Time-out" in err_msg:
+             err_msg = "❌ 错误：请求超时 (504 Gateway Time-out)。服务器处理时间过长。"
+        elif "Total execution time exceeded limit" in err_msg:
+             err_msg = f"❌ 错误：等待超时 ({int(wait_time)}秒)。任务执行时间超过了设定的'等待时间'。"
+        elif "Read timed out" in err_msg or "Connect timed out" in err_msg:
+             err_msg = f"❌ 错误：网络连接超时。网络响应慢，或者等待时间 ({int(wait_time)}秒) 不足。"
              
         print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: {err_msg}")
         

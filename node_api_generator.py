@@ -268,8 +268,7 @@ class Shaobkj_APINode:
         session, proxies = create_requests_session(bool(使用系统代理))
         wait_seconds = int(等待时间)
         submit_timeout = build_submit_timeout(wait_seconds)
-        if wait_seconds > 0:
-            submit_timeout = (min(10, wait_seconds), max(wait_seconds, 120))
+
 
         # ---------------------------------------------------------
         # Progress Bar Simulator Logic
@@ -354,21 +353,7 @@ class Shaobkj_APINode:
             )
             # pbar.update_absolute(50) # Removed static update
 
-            if response.status_code == 524:
-                print(f"[ComfyUI-shaobkj] Warning: 524 Gateway Timeout, try OpenAI fallback")
-                fallback_img = try_openai_fallback()
-                if fallback_img:
-                    return return_result(pil_to_tensor(fallback_img), format_basic_api_response("成功", pil_image=fallback_img), pil_image=fallback_img)
-                print(f"[ComfyUI-shaobkj] Warning: 524 retry once")
-                response = post_json_with_retry(
-                    session,
-                    url,
-                    headers=headers,
-                    payload=payload,
-                    timeout=submit_timeout,
-                    proxies=proxies,
-                    verify=False,
-                )
+
 
             if response.status_code not in (200, 201, 202):
                 print(f"[ComfyUI-shaobkj] API Error Status: {response.status_code}")
@@ -527,6 +512,8 @@ class Shaobkj_APINode:
                 raise RuntimeError("请求超时 (504 Gateway Time-out)。服务器处理时间过长，请稍后重试。")
             if "Total execution time exceeded limit" in error_msg:
                 raise RuntimeError(f"等待超时 ({int(等待时间)}秒)。任务执行时间超过了设定的'等待时间'，已被强制终止。")
+            if "Read timed out" in error_msg or "Connect timed out" in error_msg:
+                 raise RuntimeError(f"网络连接超时。网络响应慢，或者您设定的等待时间 ({int(等待时间)}秒) 不足以完成任务。请检查网络或增加等待时间。")
             if "Expecting value: line 1 column 1" in error_msg:
                 raise RuntimeError(f"请求失败 (数据不完整)。服务器连接不稳定，接收到的数据不完整。请增加等待时间或检查网络。")
             raise RuntimeError(f"请求失败: {error_msg}")
