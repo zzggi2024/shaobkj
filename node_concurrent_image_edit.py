@@ -923,29 +923,15 @@ class Shaobkj_Load_Batch_Images:
         return (images_out, masks_out, filenames_out)
 
 # ----------------------------------------------------------------------------
-# Legacy Node (Wrapper for compatibility)
-# ----------------------------------------------------------------------------
-class Shaobkj_ConcurrentImageEdit(Shaobkj_ConcurrentImageEdit_Sender):
-    @classmethod
-    def INPUT_TYPES(s):
-        # Return same as Sender but maybe adapt category if needed
-        d = Shaobkj_ConcurrentImageEdit_Sender.INPUT_TYPES()
-        return d
-    
-    CATEGORY = "🤖shaobkj-APIbox" # Keep original category for old workflows
-
-# ----------------------------------------------------------------------------
 # Node Registration
 # ----------------------------------------------------------------------------
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
-    "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
-    "Shaobkj_ConcurrentImageEdit": Shaobkj_ConcurrentImageEdit
+    "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-文本-图像生成 (Sender)",
-    "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)",
-    "Shaobkj_ConcurrentImageEdit": "🤖并发-文本-图像生成"
+    "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)"
 }
