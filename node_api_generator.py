@@ -969,7 +969,18 @@ class Shaobkj_APINode_Batch:
 
         prompts = [str(p) for p in prompts if str(p).strip()]
         if not prompts:
-             raise ValueError("提示词不能为空")
+             print("[ComfyUI-shaobkj] ⚠️ 提示词为空，跳过本次生成。等待上游节点输入...")
+             return ([], [])
+
+        # ---------------------------------------------------------------------------
+        # Feature: Auto-disable 'Image Count' if Prompt List is provided
+        # If we have multiple prompts (from list input or multiline split),
+        # we strictly follow the prompt count (1 image per prompt).
+        # ---------------------------------------------------------------------------
+        if len(prompts) > 1:
+            print(f"[ComfyUI-shaobkj] ℹ️ 检测到多条提示词输入 (数量: {len(prompts)})。'出图数量'参数将失效，强制按提示词列表生成。")
+            batch_count_val = 1
+        # ---------------------------------------------------------------------------
 
         # Prepare Tasks
         task_list = []
