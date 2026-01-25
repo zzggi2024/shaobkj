@@ -130,17 +130,10 @@ def run_concurrent_task_internal(data):
 
         # Prepare Request
         base_origin = str(api_url_base).rstrip("/")
-        gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
-        api_origin = urlparse(gemini_base).netloc
+        api_origin = urlparse(base_origin).netloc
         
-        url = f"{gemini_base}/v1beta/models/{model}:generateContent"
-        
-        # Support both Google and OpenAI-compatible auth headers
-        headers = {
-            "Content-Type": "application/json", 
-            "x-goog-api-key": api_key,
-            "Authorization": f"Bearer {api_key}"
-        }
+        url = f"{base_origin}/v1beta/models/{model}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
         # Force generation instruction
         final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
@@ -193,18 +186,6 @@ def run_concurrent_task_internal(data):
         submit_timeout = build_submit_timeout(wait_time)
 
         print(f"[ComfyUI-shaobkj] {task_id_local}: Sending request...")
-        def get_task_id_from_headers(resp):
-            headers_map = getattr(resp, "headers", {}) or {}
-            task_id_local = headers_map.get("X-Task-Id") or headers_map.get("Task-Id") or headers_map.get("task_id") or headers_map.get("task-id")
-            if task_id_local:
-                return task_id_local
-            location = headers_map.get("Location") or headers_map.get("location")
-            if isinstance(location, str) and location:
-                m = re.search(r"/([^/]+)/?$", location.strip())
-                if m:
-                    return m.group(1)
-            return None
-
         response = post_json_with_retry(
             session,
             url,
@@ -215,34 +196,13 @@ def run_concurrent_task_internal(data):
             verify=False
         )
         response.raise_for_status()
-        
-        # Safe JSON parsing with partial content check
-        try:
-            res_json = response.json()
-        except (json.JSONDecodeError, ValueError) as e:
-            # Handle case where response might be truncated or malformed
-            # Or EMPTY response (Expecting value: line 1 column 1)
-            err_msg = str(e)
-            print(f"[ComfyUI-shaobkj] {task_id_local}: JSON Decode Error: {err_msg}")
-            
-            raw_text = response.text
-            print(f"[ComfyUI-shaobkj] {task_id_local}: Response Content (first 500 chars): {raw_text[:500]}")
-            
-            # If empty response body, give a specific hint
-            if not raw_text or not raw_text.strip():
-                 header_task_id = get_task_id_from_headers(response)
-                 if header_task_id:
-                     res_json = {"id": header_task_id}
-                 else:
-                     raise RuntimeError(f"API returned empty response body (HTTP {response.status_code}). Please check your proxy or API status.")
-            
-            raise RuntimeError(f"Invalid JSON response from API: {err_msg}. Check console for details.")
+        res_json = response.json()
         
         # Verify response content
-        if not res_json:
-            print(f"[ComfyUI-shaobkj] {task_id_local}: Warning - Empty JSON response from API.")
         if not res_json or (not res_json.get("candidates") and not res_json.get("id") and not res_json.get("name")):
-            print(f"[ComfyUI-shaobkj] {task_id_local}: Warning - Empty or invalid response from API.")
+            # Some Google APIs return 'name' for long running operations
+            print(f"[ComfyUI-shaobkj] {task_id_local}: Warning - Empty or invalid response from API. Retrying might be needed.")
+            
         # Extract Result using shared helper
         extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
         
@@ -262,37 +222,17 @@ def run_concurrent_task_internal(data):
                  poll_timeout_val = 86400 if wait_time == 0 else wait_time
                  start_poll = time.time()
                  fail_count = 0
-                 poll_attempts = 0
                  
                  while True:
-                     elapsed = time.time() - start_poll
-                     remaining = poll_timeout_val - elapsed
-
-                     if remaining <= 0:
-                         raise RuntimeError(f"Timeout polling ({poll_timeout_val}s)")
+                     if (time.time() - start_poll) > poll_timeout_val:
+                         raise RuntimeError("Timeout polling")
                      
-                     # Adaptive polling interval
-                     if poll_attempts < 5:
-                         sleep_time = 1.0
-                     elif poll_attempts < 15:
-                         sleep_time = 2.0
-                     else:
-                         sleep_time = 3.0
-                     
-                     sleep_time = min(sleep_time, max(0.0, remaining))
-                     time.sleep(sleep_time)
-                     poll_attempts += 1
-                     
+                     time.sleep(2)
                      try:
-                         poll_req_timeout = max(1, min(30, int(remaining)))
-                         poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=poll_req_timeout)
+                         poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=30)
                          fail_count = 0
                          if poll_resp.status_code == 200:
-                             try:
-                                 poll_json = poll_resp.json()
-                             except json.JSONDecodeError:
-                                 continue
-
+                             poll_json = poll_resp.json()
                              extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60)
                              if extracted_img:
                                  break
@@ -403,18 +343,9 @@ def run_concurrent_task_internal(data):
             "completed_at": int(time.time())
         })
 
-<<<<<<< HEAD
         traceback.print_exc()
         # Suppress popup error to avoid interrupting batch workflow
         # PromptServer.instance.send_sync("shaobkj.concurrent.error", {"task_id": task_id_local, "error": err_msg})
-=======
-        # Only print traceback for unexpected errors (not common API errors)
-        # This prevents "scary" logs for standard 500/401 errors
-        if "❌ 错误" not in err_msg:
-            traceback.print_exc()
-            
-        PromptServer.instance.send_sync("shaobkj.concurrent.error", {"task_id": task_id_local, "error": err_msg})
->>>>>>> aad5798 (Improve API compatibility and resilience)
 
 
 # ----------------------------------------------------------------------------
@@ -491,85 +422,17 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     FUNCTION = "submit_task"
     CATEGORY = "🤖shaobkj-APIbox/Concurrent"
     OUTPUT_NODE = True
-    
-    # --- Batch Monitor Thread (Defined as class method or static helper to be visible) ---
-    @staticmethod
-    def batch_monitor_thread(generated_ids, batch_summary_info):
-        def get_async_task(tid):
-            return get_all_async_tasks().get(tid)
-
-        if not generated_ids:
-            return
-            
-        print(f"[ComfyUI-shaobkj] 🔄 批量任务监控已启动，共 {len(generated_ids)} 个任务...")
-        
-        # Wait for all tasks to complete
-        pending_ids = set(generated_ids)
-        completed_tasks = {} # id -> status_info
-        
-        monitor_timeout = 86400 
-        start_monitor = time.time()
-        
-        while pending_ids:
-            if time.time() - start_monitor > monitor_timeout:
-                print(f"[ComfyUI-shaobkj] ⚠️ 批量监控超时，停止监控。")
-                break
-                
-            current_done = []
-            for tid in pending_ids:
-                task_info = get_async_task(tid)
-                if task_info:
-                    status = task_info.get("status")
-                    if status in ["success", "failed"]:
-                        completed_tasks[tid] = task_info
-                        current_done.append(tid)
-            
-            for tid in current_done:
-                pending_ids.remove(tid)
-                
-            if not pending_ids:
-                break
-                
-            time.sleep(2)
-        
-        # Generate Report
-        success_count = 0
-        fail_count = 0
-        fail_reasons = []
-        
-        for tid, info in completed_tasks.items():
-            if info.get("status") == "success":
-                success_count += 1
-            else:
-                fail_count += 1
-                reason = info.get("error", "Unknown error")
-                if reason not in fail_reasons:
-                        fail_reasons.append(reason)
-        
-        print("\n" + "="*50)
-        print(f"[ComfyUI-shaobkj] ✅ 批量任务完成！")
-        print(f"📊 总计: {len(generated_ids)} | 成功: {success_count} | 失败: {fail_count}")
-        if fail_count > 0:
-            print(f"❌ 失败原因摘要:")
-            for r in fail_reasons:
-                print(f"   - {r}")
-        print("="*50 + "\n")
-        
-        PromptServer.instance.send_sync("shaobkj.batch.finished", {
-            "total": len(generated_ids),
-            "success": success_count,
-            "failed": fail_count
-        })
 
     def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 保存路径, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True wraps everything in lists
-        batch_monitor_thread = self.batch_monitor_thread
+        # We assume common parameters are same for all items (take first), OR we should support batching them too.
+        # For simplicity, let's take the first item for "global" settings, but support batching for Prompts and Images.
         
         def get_val(v, default=None):
             if isinstance(v, list) and len(v) > 0:
                 return v[0]
             return v
-            
+        
         api_key_val = get_val(API密钥)
         api_url_val = get_val(API地址)
         model_val = get_val(模型选择)
@@ -812,15 +675,15 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 if submit_interval_val > 0 and i < final_batch_size - 1:
                     time.sleep(submit_interval_val)
             
-            # Start Monitor Thread
-            t_mon = threading.Thread(target=batch_monitor_thread, args=(generated_ids, ui_summary))
-            t_mon.daemon = True
-            t_mon.start()
-
             # Return list of IDs (Since INPUT_IS_LIST=True, output should be list)
             status_list = [f"已提交: {gid} | {ui_summary}" for gid in generated_ids]
             
-            # If `generated_ids` is empty (e.g. no inputs), we should return empty list or handle gracefully.
+            # CRITICAL FIX for ComfyUI "List Execution":
+            # If we return a LIST of strings, ComfyUI might interpret this as "Run downstream node N times".
+            # BUT, we want downstream node (Receiver) to run N times ANYWAY because we are outputting N IDs.
+            # So returning a list IS correct for "Batch" behavior.
+            
+            # HOWEVER, if `generated_ids` is empty (e.g. no inputs), we should return empty list or handle gracefully.
             if not generated_ids:
                 return ([], [])
             
@@ -828,15 +691,12 @@ class Shaobkj_ConcurrentImageEdit_Sender:
 
 
 # ----------------------------------------------------------------------------
-<<<<<<< HEAD
 # Node B: Receiver (Removed)
 # ----------------------------------------------------------------------------
 # Class Shaobkj_ConcurrentImageEdit_Receiver has been removed as per request.
 
 
 # ----------------------------------------------------------------------------
-=======
->>>>>>> aad5798 (Improve API compatibility and resilience)
 # Node C: Load Batch Images From Path
 # ----------------------------------------------------------------------------
 class Shaobkj_Load_Batch_Images:
@@ -963,7 +823,56 @@ class Shaobkj_Load_Batch_Images:
              raise ValueError("No images loaded successfully.")
 
         # Return Lists (Implicitly "Original Size")
-        # This works well with nodes that have INPUT_IS_LIST=True (receiving the full list)
-        # or standard nodes (triggering execution for each item in the list).
+        # CRITICAL FIX: To prevent ComfyUI from iterating this list, we must return it as a SINGLE item (a list wrapped in another structure?)
+        # NO! ComfyUI iterates if the return type matches the connection type and it's a list.
+        # But if the downstream node has INPUT_IS_LIST = True, ComfyUI passes the whole list.
+        
+        # The issue in screenshot: "Batch Inputs: image_1=0"
+        # This means `image_1` received an EMPTY list or empty tensor?
+        # But `Shaobkj-Loader` printed "Found 8 images".
+        # So `images_out` has 8 items.
+        # Why did Sender receive 0 items?
+        
+        # Hypothesis:
+        # Sender `normalize_image_input` failed to extract tensors.
+        # `images_out` is `[Tensor, Tensor...]`.
+        # Sender receives this list.
+        # `normalize_image_input` iterates it.
+        # It checks `isinstance(item, torch.Tensor)`.
+        # Yes, item is Tensor [1, H, W, C].
+        # It appends `item[i]`. `item.shape[0]` is 1. So it appends `item[0]`.
+        # `flat_list` should have 8 items.
+        
+        # Wait, look at the log: `image_1=0`.
+        # This means `normalized_inputs['image_1']` is empty.
+        # Why?
+        # Maybe `INPUT_IS_LIST=True` causes ComfyUI to wrap the list AGAIN?
+        # If Loader returns `[T1, T2]`.
+        # ComfyUI passes `[[T1, T2]]` (List of List)?
+        # Let's debug `normalize_image_input`.
+        # I added check: `if isinstance(val, list): for item in val: ...`
+        # If `val` is `[[T1, T2]]`.
+        # Item 0 is `[T1, T2]`.
+        # `isinstance([T1, T2], torch.Tensor)` is False.
+        # So it skips!
+        # Ah! `normalize_image_input` only handles List of Tensors OR Tensor.
+        # It does NOT handle List of Lists!
+        
+        # If upstream returns a List, and INPUT_IS_LIST=True, ComfyUI might pass the list AS IS.
+        # But if upstream returns a Batch Tensor, ComfyUI passes [Tensor].
+        
+        # Let's fix `normalize_image_input` to handle nested lists recursively or just one level deeper.
+        
         return (images_out, masks_out, filenames_out)
 
+# ----------------------------------------------------------------------------
+# Legacy Node (Wrapper for compatibility)
+# ----------------------------------------------------------------------------
+class Shaobkj_ConcurrentImageEdit(Shaobkj_ConcurrentImageEdit_Sender):
+    @classmethod
+    def INPUT_TYPES(s):
+        # Return same as Sender but maybe adapt category if needed
+        d = Shaobkj_ConcurrentImageEdit_Sender.INPUT_TYPES()
+        return d
+    
+    CATEGORY = "🤖shaobkj-APIbox" # Keep original category for old workflows
