@@ -10,8 +10,11 @@ import random
 import time
 import traceback
 import concurrent.futures
+import threading
 from urllib.parse import urlparse
 import pandas as pd
+import folder_paths
+from server import PromptServer
 
 import torch.nn.functional as F
 
@@ -23,6 +26,10 @@ from .shaobkj_shared import (
     get_config_value,
     pil_to_tensor,
     post_json_with_retry,
+    save_local_record,
+    update_async_task,
+    get_all_async_tasks,
+    resize_and_encode_image,
 )
 from comfy.utils import ProgressBar
 
@@ -526,6 +533,308 @@ class Shaobkj_APINode:
             pbar.update_absolute(100)
 
 
+# ----------------------------------------------------------------------------
+# Background Worker for Text-to-Image Batch
+# ----------------------------------------------------------------------------
+
+def snap_to_aspect_ratio(ratio):
+    """
+    Snaps a float ratio (width/height) to the nearest standard aspect ratio string.
+    """
+    standards = {
+        1.0: "1:1",
+        4/3: "4:3",
+        3/4: "3:4",
+        3/2: "3:2",
+        2/3: "2:3",
+        16/9: "16:9",
+        9/16: "9:16",
+        21/9: "21:9",
+        9/21: "9:21"
+    }
+    
+    closest_dist = float('inf')
+    closest_str = "1:1"
+    
+    for r_val, r_str in standards.items():
+        dist = abs(ratio - r_val)
+        if dist < closest_dist:
+            closest_dist = dist
+            closest_str = r_str
+            
+    return closest_str
+
+def run_batch_generation_task(data):
+    # Use provided task_id or generate new one
+    task_id_local = data.get("task_id")
+    if not task_id_local:
+        task_id_local = f"task_{int(time.time())}_{random.randint(1000,9999)}"
+    
+    print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Starting task {task_id_local}...")
+    
+    # Initial status update
+    update_async_task(task_id_local, {
+        "status": "running",
+        "submitted_at": int(time.time()),
+        "prompt": data.get("prompt", "")[:50] + "...",
+        "type": "gen_batch"
+    })
+
+    try:
+        # Parse params
+        api_key = data.get("api_key")
+        api_url_base = data.get("api_url", "https://yhmx.work")
+        model = data.get("model", "gemini-3-pro-image-preview")
+        use_proxy = data.get("use_proxy", False)
+        resolution = data.get("resolution", "1k")
+        prompt = data.get("prompt", "")
+        aspect_ratio = data.get("aspect_ratio", "Free")
+        wait_time = int(data.get("wait_time", 0))
+        seed_val = int(data.get("seed", 0))
+        save_path_input = data.get("save_path", "")
+        save_format_input = data.get("save_format", "JPEG (默认95%)")
+
+        if not api_key:
+             raise ValueError("API Key is required")
+
+        # Prepare Request
+        base_origin = str(api_url_base).rstrip("/")
+        api_origin = urlparse(base_origin).netloc
+        
+        url = f"{base_origin}/v1beta/models/{model}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key, "Authorization": f"Bearer {api_key}"}
+        
+        # Force generation instruction
+        final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
+        parts = [{"text": final_prompt}]
+        
+        # Handle Images (New)
+        tensor_images = data.get("tensor_images", [])
+        long_side = int(data.get("long_side", 1280))
+        
+        first_image_ratio = None
+
+        for idx, img in enumerate(tensor_images):
+            try:
+                b64_str, img_ratio = resize_and_encode_image(img, long_side)
+                if idx == 0:
+                    first_image_ratio = img_ratio
+                
+                if b64_str:
+                    parts.append({
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": b64_str
+                        }
+                    })
+            except Exception as e:
+                print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Error encoding image: {e}")
+        
+        # Seed Logic
+        safe_seed = seed_val
+        if safe_seed < 0:
+            safe_seed = random.randint(0, 2147483647)
+        if safe_seed > 2147483647:
+            safe_seed = safe_seed % 2147483647
+
+        payload = {
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {
+                "temperature": 0.7, 
+                "seed": safe_seed, 
+                "responseModalities": ["IMAGE"]
+            }
+        }
+        payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
+
+        target_aspect_ratio = aspect_ratio
+        
+        # Resolve "原图1比例"
+        if target_aspect_ratio == "原图1比例":
+            if first_image_ratio is not None:
+                target_aspect_ratio = snap_to_aspect_ratio(first_image_ratio)
+            else:
+                # Fallback if no image provided but "原图1比例" selected? 
+                # Maybe default to 1:1 or keep as is (which API might ignore or error)
+                # Let's default to "1:1" if no image
+                target_aspect_ratio = "1:1"
+
+        if target_aspect_ratio and target_aspect_ratio != "Free" and target_aspect_ratio != "原图1比例":
+            payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(target_aspect_ratio)
+
+        # Send Request
+        disable_insecure_request_warnings()
+        session, proxies = create_requests_session(bool(use_proxy))
+        submit_timeout = build_submit_timeout(wait_time)
+        
+        # Helper Functions
+        def get_task_id_from_headers(resp):
+            headers_map = getattr(resp, "headers", {}) or {}
+            tid = headers_map.get("X-Task-Id") or headers_map.get("Task-Id") or headers_map.get("task_id") or headers_map.get("task-id")
+            if tid: return tid
+            location = headers_map.get("Location") or headers_map.get("location")
+            if isinstance(location, str) and location:
+                m = re.search(r"/([^/]+)/?$", location.strip())
+                if m: return m.group(1)
+            return None
+
+        print(f"[ComfyUI-shaobkj] {task_id_local}: Sending request...")
+        
+        response = post_json_with_retry(
+            session,
+            url,
+            headers=headers,
+            payload=payload,
+            timeout=submit_timeout,
+            proxies=proxies,
+            verify=False
+        )
+        
+        if response.status_code not in (200, 201, 202):
+            print(f"[ComfyUI-shaobkj] [Concurrent-Batch] {task_id_local}: API Error Status: {response.status_code}")
+            try:
+                print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Error Body: {response.text[:200]}")
+            except: pass
+        
+        response.raise_for_status()
+        
+        try:
+            res_json = response.json()
+        except (json.JSONDecodeError, ValueError):
+             raw_text = response.text
+             if not raw_text or not raw_text.strip():
+                 print(f"[ComfyUI-shaobkj] [Concurrent-Batch] {task_id_local}: Warning: Empty response body")
+                 task_id = get_task_id_from_headers(response)
+                 if task_id:
+                     res_json = {"id": task_id}
+                 else:
+                     raise RuntimeError(f"API Error: Empty response body (HTTP {response.status_code})")
+             else:
+                 raise
+
+        # Verify response content
+        extracted_img = None
+        if not res_json or (not res_json.get("candidates") and not res_json.get("id") and not res_json.get("name") and not res_json.get("data")):
+            print(f"[ComfyUI-shaobkj] {task_id_local}: Warning - Empty or invalid response from API.")
+
+        # Extract Result
+        extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
+        
+        remote_task_id = None
+        
+        if not extracted_img:
+             remote_task_id = res_json.get("id") or res_json.get("task_id")
+             if not remote_task_id and "name" in res_json:
+                 remote_task_id = res_json["name"]
+             if not remote_task_id and "data" in res_json:
+                 remote_task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
+             
+             if not remote_task_id:
+                 remote_task_id = get_task_id_from_headers(response)
+
+             if remote_task_id:
+                 print(f"[ComfyUI-shaobkj] {task_id_local}: Polling remote task {remote_task_id}...")
+                 poll_url = f"{url}/{remote_task_id}"
+                 poll_timeout_val = 86400 if wait_time == 0 else wait_time
+                 start_poll = time.time()
+                 fail_count = 0
+                 
+                 while True:
+                     if (time.time() - start_poll) > poll_timeout_val:
+                         raise RuntimeError("Timeout polling")
+                     
+                     time.sleep(2)
+                     try:
+                         poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=30)
+                         fail_count = 0
+                         if poll_resp.status_code == 200:
+                             poll_json = poll_resp.json()
+                             extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60)
+                             if extracted_img:
+                                 break
+                             
+                             status = poll_json.get("status") or poll_json.get("task_status")
+                             if status in ["FAILED", "ERROR"]:
+                                 raise RuntimeError(f"Remote Task failed: {status}")
+                     except Exception as e:
+                         fail_count += 1
+                         print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Polling error: {e}")
+                         if fail_count > 10:
+                             raise
+
+        # Save Result
+        if extracted_img:
+            # Determine Format
+            save_params = {"format": "JPEG", "quality": 95}
+            ext = ".jpg"
+            
+            if save_format_input and "PNG" in save_format_input:
+                save_params = {"format": "PNG"}
+                ext = ".png"
+            elif save_format_input and "WEBP" in save_format_input:
+                save_params = {"format": "WEBP", "lossless": True}
+                ext = ".webp"
+
+            # Determine Filename
+            custom_filename = data.get("output_filename")
+            if custom_filename:
+                base_name = os.path.splitext(os.path.basename(str(custom_filename)))[0]
+                filename = f"{base_name}{ext}"
+            else:
+                filename = f"batch_gen_{int(time.time())}_{random.randint(1000,9999)}{ext}"
+            
+            # Determine output directory
+            out_dir = folder_paths.get_output_directory()
+            if save_path_input and isinstance(save_path_input, str) and save_path_input.strip():
+                custom_dir = save_path_input.strip()
+                if not os.path.isabs(custom_dir):
+                    custom_dir = os.path.join(out_dir, custom_dir)
+                try:
+                    os.makedirs(custom_dir, exist_ok=True)
+                    out_dir = custom_dir
+                except Exception as e:
+                    print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Failed to create custom dir {custom_dir}: {e}")
+
+            out_path = os.path.join(out_dir, filename)
+            
+            # Check for overwrite
+            counter = 1
+            original_base_name = os.path.splitext(filename)[0]
+            while os.path.exists(out_path):
+                new_filename = f"{original_base_name}_{counter}{ext}"
+                out_path = os.path.join(out_dir, new_filename)
+                filename = new_filename
+                counter += 1
+            
+            extracted_img.save(out_path, **save_params)
+            
+            print(f"[ComfyUI-shaobkj] [Concurrent-Batch] {task_id_local}: Success! Saved to {out_path}")
+            
+            update_async_task(task_id_local, {
+                "status": "success",
+                "image_path": out_path,
+                "completed_at": int(time.time())
+            })
+            
+            save_local_record("Concurrent_Batch", str(remote_task_id or task_id_local), "Success", api_url_base)
+            PromptServer.instance.send_sync("shaobkj.concurrent.success", {"task_id": task_id_local, "filename": filename, "path": out_path})
+            
+            return task_id_local
+        else:
+            brief = sanitize_text(json.dumps(res_json, ensure_ascii=False))
+            raise RuntimeError(f"No image data found in response: {brief}")
+
+    except Exception as e:
+        err_msg = str(e)
+        print(f"[ComfyUI-shaobkj] [Concurrent-Batch] {task_id_local}: {err_msg}")
+        update_async_task(task_id_local, {
+            "status": "failed",
+            "error": err_msg,
+            "completed_at": int(time.time())
+        })
+        raise RuntimeError(err_msg)
+
+
 class Shaobkj_APINode_Batch:
     def __init__(self):
         pass
@@ -542,10 +851,12 @@ class Shaobkj_APINode_Batch:
                 "使用系统代理": ("BOOLEAN", {"default": False}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (
-                    ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21"],
-                    {"default": "Free"},
+                    ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
+                    {"default": "原图1比例"},
                 ),
-                "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
+                "出图数量": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1, "tooltip": "单次提交的任务总数/循环次数"}),
+                "指定文件名": ("STRING", {"default": "", "multiline": False, "placeholder": "为空则自动命名，输入则自动添加序号"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "Batch拆分模式": ("BOOLEAN", {"default": True}),
                 "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)"}),
@@ -554,316 +865,239 @@ class Shaobkj_APINode_Batch:
                 "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数"}),
                 "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交之间的间隔时间(秒)"}),
             },
-            "optional": {
-                "文件列名": ("STRING", {"default": "prompt", "multiline": False, "tooltip": "CSV/Excel中提示词所在的列名"}),
-            }
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("图像", "API响应")
+    INPUT_IS_LIST = True
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("任务ID列表", "提交状态")
     FUNCTION = "generate_images_batch"
     CATEGORY = "🤖shaobkj-APIbox"
+    OUTPUT_NODE = True
 
-    def generate_images_batch(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 等待时间, seed, Batch拆分模式, Batch对齐方式, 保存路径, 保存格式, 最大并发数, 并发间隔, 文件列名="prompt", **kwargs):
-        api_key = API密钥
-        base_origin = str(API地址).rstrip("/")
-        gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
-        api_origin = urlparse(gemini_base).netloc
-        model = 模型选择
-        resolution = 分辨率
-        aspect_ratio = 图片比例
-        timeout_val = None if int(等待时间) == 0 else int(等待时间)
+    def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 输入图像_长边设置=1280, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="JPEG (默认95%)", 最大并发数=5, 并发间隔=1.0, **kwargs):
+        # Unwrap parameters because INPUT_IS_LIST = True
+        def get_val(v, default=None):
+            if isinstance(v, list) and len(v) > 0:
+                return v[0]
+            return v
         
-        # Legacy mapping for logic compatibility
-        并发数 = 最大并发数 
-        提示词列表 = 提示词
+        # Helper to normalize generic list inputs (recursively flatten)
+        def normalize_list_input(val):
+            flat_list = []
+            if isinstance(val, list):
+                for item in val:
+                    flat_list.extend(normalize_list_input(item))
+            else:
+                flat_list.append(val)
+            return flat_list
 
-        if not api_key:
+        # Helper to normalize image inputs (Tensor to PIL)
+        def normalize_image_input(val):
+            flat_list = []
+            if isinstance(val, list):
+                for item in val:
+                    if isinstance(item, list):
+                         flat_list.extend(normalize_image_input(item))
+                    elif isinstance(item, torch.Tensor):
+                        # item is [B,H,W,C]
+                        for i in range(item.shape[0]):
+                            flat_list.append(Image.fromarray(np.clip(255. * item[i].cpu().numpy(), 0, 255).astype(np.uint8)))
+            elif isinstance(val, torch.Tensor):
+                 for i in range(val.shape[0]):
+                    flat_list.append(Image.fromarray(np.clip(255. * val[i].cpu().numpy(), 0, 255).astype(np.uint8)))
+            return flat_list
+        
+        api_key_val = get_val(API密钥)
+        api_url_val = get_val(API地址)
+        model_val = get_val(模型选择)
+        use_proxy_val = get_val(使用系统代理)
+        
+        long_side_val = int(get_val(输入图像_长边设置))
+        batch_count_val = int(get_val(出图数量))
+        
+        # Lists
+        resolution_list = normalize_list_input(分辨率)
+        aspect_ratio_list = normalize_list_input(图片比例)
+        seed_list = normalize_list_input(seed)
+        save_path_list = normalize_list_input(保存路径)
+        save_format_list = normalize_list_input(保存格式)
+        filename_prefix_list = normalize_list_input(指定文件名)
+        
+        # Process Image Inputs
+        normalized_images = {}
+        for k, v in kwargs.items():
+            if k.startswith("image_"):
+                normalized_images[k] = normalize_image_input(v)
+        sorted_image_keys = sorted(normalized_images.keys())
+        
+        # Config
+        batch_split_val = get_val(Batch拆分模式, True)
+        batch_align_val = get_val(Batch对齐方式, "循环补全(Max)")
+        submit_interval_val = float(get_val(并发间隔, 1.0))
+        max_workers_val = int(get_val(最大并发数, 5))
+
+        if not api_key_val:
             raise ValueError("API Key is required.")
 
-        # --- Phase 1 Feature: Excel/CSV Support ---
-        raw_input = str(提示词列表 or "").strip()
+        # Prepare Prompts
         prompts = []
-        
-        # Check if input looks like a file path and exists
-        if raw_input and (raw_input.endswith('.csv') or raw_input.endswith('.xlsx') or raw_input.endswith('.xls')) and os.path.exists(raw_input.strip('"')):
-            file_path = raw_input.strip('"')
-            print(f"[Shaobkj-Batch] Reading prompts from file: {file_path}")
-            try:
-                if file_path.endswith('.csv'):
-                    df = pd.read_csv(file_path)
-                else:
-                    df = pd.read_excel(file_path)
-                
-                if 文件列名 in df.columns:
-                    prompts = df[文件列名].dropna().astype(str).tolist()
-                    print(f"[Shaobkj-Batch] Loaded {len(prompts)} prompts from column '{文件列名}'")
-                else:
-                    print(f"[Shaobkj-Batch] Warning: Column '{文件列名}' not found. Columns: {df.columns.tolist()}")
-                    raise ValueError(f"列 '{文件列名}' 不存在于文件中")
-            except Exception as e:
-                raise ValueError(f"读取文件失败: {e}")
-        else:
-            # Fallback to standard multiline text
-            prompts = [p.strip() for p in raw_input.splitlines() if p.strip()]
+        raw_prompts = normalize_list_input(提示词)
+        for p in raw_prompts:
+            if isinstance(p, str) and "\n" in p and len(raw_prompts) == 1:
+                # If single prompt has multiple lines, treat as one prompt?
+                # Wait, original logic:
+                # if ... len(raw_prompts) == 1: lines = ... prompts.extend(lines)
+                # This splits a single multiline string into multiple prompts.
+                # If the user wants 1 prompt with newlines, this breaks it.
+                # But legacy logic did this. User said "logic same as Concurrent-Sender".
+                # Concurrent-Sender logic in node_concurrent_image_edit.py (which I read before) does file reading.
+                # Since I'm removing file reading, I should check if I should keep this splitting behavior.
+                # The user said "logic same as Concurrent-Sender".
+                # Concurrent-Sender supports multiline prompt box as one prompt?
+                # Usually ComfyUI string widgets are multiline.
+                # If I type "A cat\nwith a hat", is it 1 prompt or 2?
+                # If it's 1 prompt, I shouldn't split.
+                # But lines 924-926 in original file did split.
+                # I'll keep the logic for now to be safe, or check lines 924-926.
+                # Actually, let's just append p.
+                # But wait, if user pastes a list of prompts separated by newlines, they expect batch.
+                # So I'll keep the splitting logic if it's a single input item.
+                lines = [l.strip() for l in p.splitlines() if l.strip()]
+                prompts.extend(lines)
+            else:
+                prompts.append(str(p))
 
+        prompts = [str(p) for p in prompts if str(p).strip()]
         if not prompts:
-            raise ValueError("提示词列表不能为空。")
+             raise ValueError("提示词不能为空")
 
-        disable_insecure_request_warnings()
-
-        # Support both Google and OpenAI-compatible auth headers
-        base_headers = {
-            "Content-Type": "application/json", 
-            "x-goog-api-key": api_key,
-            "Authorization": f"Bearer {api_key}"
-        }
+        # Prepare Tasks
+        task_list = []
+        base_task_id = f"batch_{int(time.time())}_{random.randint(1000,9999)}"
         
-        url = f"{gemini_base}/v1beta/models/{model}:generateContent"
-        submit_timeout = build_submit_timeout(int(等待时间))
-        session, proxies = create_requests_session(bool(使用系统代理))
-
-        # ---------------------------------------------------------
-        # Progress Bar Simulator Logic (Batch)
-        # ---------------------------------------------------------
-        pbar = ProgressBar(100)
-        pbar.update_absolute(0)
-        progress_state = {"stop": False}
-
-        def progress_simulator():
-            current = 0.0
-            while not progress_state["stop"] and current < 95.0:
-                time.sleep(0.1)
-                if current < 30: step = 2.0
-                elif current < 60: step = 0.5
-                elif current < 80: step = 0.2
-                else: step = 0.05
-                current += step
-                if current > 95: current = 95
-                pbar.update_absolute(int(current))
-
-        import threading
-        t_progress = threading.Thread(target=progress_simulator)
-        t_progress.daemon = True
-        t_progress.start()
-
-        def format_basic_api_response(status, safe_seed, pil_image=None, task_id=None):
-            lines = [
-                f"状态: {status}",
-                f"模型: {model}",
-                f"分辨率: {resolution}",
-                f"图片比例: {aspect_ratio}",
-                f"seed: {safe_seed}",
-            ]
-            if task_id:
-                lines.append(f"任务ID: {task_id}")
-            if pil_image is not None:
-                try:
-                    w, h = pil_image.size
-                    lines.append(f"实际尺寸: {int(w)}x{int(h)}")
-                except Exception:
-                    pass
-            return "\n".join(lines)
-
-        def normalize_seed(seed_value):
-            safe_seed = int(seed_value)
-            if safe_seed < 0:
-                safe_seed = random.randint(0, 2147483647)
-            if safe_seed > 2147483647:
-                safe_seed = safe_seed % 2147483647
-            return safe_seed
-
-        def extract_brief_message(obj):
-            if isinstance(obj, dict):
-                err = obj.get("error")
-                if isinstance(err, dict):
-                    return err.get("message") or err.get("msg") or err.get("code")
-                data = obj.get("data")
-                if isinstance(data, dict):
-                    err2 = data.get("error")
-                    if isinstance(err2, dict):
-                        return err2.get("message") or err2.get("msg") or err2.get("code")
-                return obj.get("message") or obj.get("msg") or obj.get("error_message") or obj.get("detail")
-            return None
-
-        def get_task_id_from_headers(resp):
-            headers_map = getattr(resp, "headers", {}) or {}
-            task_id_local = headers_map.get("X-Task-Id") or headers_map.get("Task-Id") or headers_map.get("task_id") or headers_map.get("task-id")
-            if task_id_local:
-                return task_id_local
-            location = headers_map.get("Location") or headers_map.get("location")
-            if isinstance(location, str) and location:
-                m = re.search(r"/([^/]+)/?$", location.strip())
-                if m:
-                    return m.group(1)
-            return None
-
-        def generate_one(index, prompt):
-            local_seed = normalize_seed(int(seed) + int(index))
-            # Session and proxies reused from outer scope
-            # Force image generation by appending instruction
-            final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
-            parts = [{"text": final_prompt}]
-            payload = {"contents": [{"role": "user", "parts": parts}]}
-            payload["generationConfig"] = {"temperature": 0.7, "seed": local_seed, "responseModalities": ["TEXT", "IMAGE"]}
-            payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
-            if aspect_ratio and aspect_ratio != "Free":
-                payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(aspect_ratio)
-            task_id = None
-
-            response = post_json_with_retry(
-                session,
-                url,
-                headers=base_headers,
-                payload=payload,
-                timeout=submit_timeout,
-                proxies=proxies,
-                verify=False,
-            )
-            response.raise_for_status()
-            task_id = None
-            try:
-                res_json = response.json()
-            except (json.JSONDecodeError, ValueError) as e:
-                raw_text = response.text
-                if not raw_text or not raw_text.strip():
-                    task_id = get_task_id_from_headers(response)
-                    res_json = {}
-                else:
-                    raise RuntimeError(f"Invalid JSON response from API: {e}")
-
-            extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
-            if extracted_img:
-                return (pil_to_tensor(extracted_img), format_basic_api_response("成功", local_seed, pil_image=extracted_img, task_id=task_id))
-
-            if isinstance(res_json, dict):
-                if task_id is None:
-                    task_id = res_json.get("id") or res_json.get("task_id")
-                if not task_id and "data" in res_json and isinstance(res_json["data"], dict):
-                    task_id = res_json["data"].get("id") or res_json["data"].get("task_id")
-            if not task_id:
-                brief = extract_brief_message(res_json)
-                if brief:
-                    raise RuntimeError(f"未找到任务ID，API响应: {sanitize_text(brief)}")
-                raise RuntimeError(f"未找到任务ID，API响应: {sanitize_text(json.dumps(res_json, ensure_ascii=False))}")
-
-            poll_url = f"{url}/{task_id}"
-            poll_timeout_val = 86400 if int(等待时间) == 0 else int(等待时间)
-            start_time = time.time()
-            fail_count = 0
-            done_statuses = {"SUCCEEDED", "SUCCESS", "COMPLETED", "FINISHED", "DONE"}
-            failed_statuses = {"FAILED", "FAIL", "ERROR", "FAILURE", "CANCELED", "CANCELLED"}
-            while True:
-                elapsed = time.time() - start_time
-                remaining = poll_timeout_val - elapsed
-                if remaining <= 0:
-                    raise RuntimeError(f"图像生成超时 ({poll_timeout_val}秒)")
-                time.sleep(min(5, max(0.0, remaining)))
-                try:
-                    poll_req_timeout = 30 if int(等待时间) == 0 else max(1, min(30, int(remaining)))
-                    poll_resp = session.get(
-                        poll_url,
-                        headers=base_headers,
-                        params={"_t": int(time.time() * 1000)},
-                        verify=False,
-                        timeout=poll_req_timeout,
-                        proxies=proxies,
-                    )
-                    fail_count = 0
-                except Exception as e:
-                    fail_count += 1
-                    if fail_count >= 10:
-                        raise RuntimeError(f"Polling failed 10 times consecutively. Last error: {e}")
-                    continue
-                if poll_resp.status_code != 200:
-                    continue
-                poll_json = poll_resp.json()
-                extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
-                if extracted_img:
-                    return (pil_to_tensor(extracted_img), format_basic_api_response("成功", local_seed, pil_image=extracted_img, task_id=task_id))
-                
-                status = None
-                if isinstance(poll_json, dict):
-                    status = poll_json.get("status") or poll_json.get("task_status")
-                    if not status and "data" in poll_json and isinstance(poll_json["data"], dict):
-                        status = poll_json["data"].get("status") or poll_json["data"].get("task_status")
-                status_str = str(status).strip().upper() if status is not None else ""
-                if status_str in failed_statuses:
-                    brief = extract_brief_message(poll_json)
-                    if brief:
-                        raise RuntimeError(f"图像生成失败: {sanitize_text(brief)}")
-                    raise RuntimeError(f"图像生成失败: {sanitize_text(json.dumps(poll_json, ensure_ascii=False))}")
-                if status_str in done_statuses:
-                    brief = extract_brief_message(poll_json)
-                    if brief:
-                        raise RuntimeError(f"任务已完成但未找到图像: {sanitize_text(brief)}")
-                    raise RuntimeError(f"任务已完成但未找到图像: {sanitize_text(json.dumps(poll_json, ensure_ascii=False))}")
-
-        errors = []
-        results = []
-        concurrency_limit = int(并发数)
-        if concurrency_limit <= 0:
-            max_workers = min(10, max(1, len(prompts)))
+        # Determine Batch Size
+        if not batch_split_val:
+             final_batch_size = 1
         else:
-            max_workers = min(10, max(1, min(concurrency_limit, len(prompts))))
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_map = {executor.submit(generate_one, idx, p): (idx, p) for idx, p in enumerate(prompts)}
-                for fut in concurrent.futures.as_completed(future_map):
-                    idx, p = future_map[fut]
-                    try:
-                        img_tensor, resp_text = fut.result()
-                        results.append((idx, img_tensor, resp_text))
-                    except Exception as e:
-                        errors.append((idx, sanitize_text(str(e))))
-        finally:
-            progress_state["stop"] = True
-            if t_progress.is_alive():
-                t_progress.join(timeout=1.0)
-            pbar.update_absolute(100)
+             lengths = []
+             lengths.append(len(prompts))
+             if len(seed_list) > 1: lengths.append(len(seed_list))
+             if len(resolution_list) > 1: lengths.append(len(resolution_list))
+             if len(aspect_ratio_list) > 1: lengths.append(len(aspect_ratio_list))
+             
+             # Add Image Lengths
+             for k, v in normalized_images.items():
+                 if len(v) > 1: lengths.append(len(v))
+             
+             # Add Batch Count
+             if batch_count_val > 1:
+                 lengths.append(batch_count_val)
+             
+             if not lengths: 
+                 final_batch_size = 1
+             elif batch_align_val == "裁切对齐(Min)":
+                 final_batch_size = min(lengths)
+             else:
+                 final_batch_size = max(lengths)
 
-        results.sort(key=lambda x: x[0])
-        ok_tensors = [r[1] for r in results if isinstance(r[1], torch.Tensor)]
-        if not ok_tensors:
-            raise RuntimeError(f"批量生成全部失败，示例错误: {errors[0][1] if errors else '未知错误'}")
-
-        # --- Phase 1 Feature: Smart Padding ---
-        # The previous pad_tensor_to logic was basic. Now we use the logic inspired by nkxx but adapted for tensors.
-        # However, nkxx logic converts PIL->Tensor with padding. Here we already have tensors.
-        # The existing logic here already pads to max_h/max_w.
-        # Let's verify if we need to change it. 
-        # The existing logic:
-        # max_h = max(int(t.shape[1]) for t in ok_tensors)
-        # max_w = max(int(t.shape[2]) for t in ok_tensors)
-        # padded = [pad_tensor_to(t, max_h, max_w) for t in ok_tensors]
-        # This is already what "Smart Padding" does (Auto-Padding).
-        # So I just need to make sure pad_tensor_to is robust.
+        print(f"[Shaobkj-Batch] Final Batch Size: {final_batch_size} (Mode: {batch_align_val}, Count: {batch_count_val})")
         
-        def pad_tensor_to_v2(t, max_h, max_w):
-            if not isinstance(t, torch.Tensor) or t.dim() != 4:
-                return t
-            b, h, w, c = t.shape
-            if h == max_h and w == max_w:
-                return t
-            # T is [B, H, W, C]
-            # Permute to [B, C, H, W] for padding
-            tch = t.permute(0, 3, 1, 2)
-            pad_w = max_w - w
-            pad_h = max_h - h
-            # Pad right and bottom
-            padded = F.pad(tch, (0, pad_w, 0, pad_h), "constant", 0)
-            # Permute back
-            return padded.permute(0, 2, 3, 1)
+        for i in range(final_batch_size):
+            sub_task_id = f"{base_task_id}_{i}"
+            p = prompts[i % len(prompts)]
+            
+            if len(seed_list) == 1:
+                s_val = int(seed_list[0]) + i
+            else:
+                s_val = int(seed_list[i % len(seed_list)])
 
-        max_h = max(int(t.shape[1]) for t in ok_tensors)
-        max_w = max(int(t.shape[2]) for t in ok_tensors)
-        padded = [pad_tensor_to_v2(t, max_h, max_w) for t in ok_tensors]
-        batch_tensor = torch.cat(padded, dim=0)
+            # Collect Task Images
+            task_imgs = []
+            for k in sorted_image_keys:
+                imgs = normalized_images[k]
+                if imgs:
+                    task_imgs.append(imgs[i % len(imgs)])
 
-        lines = [f"批量生成完成 | 总数: {len(prompts)} | 成功: {len(ok_tensors)} | 失败: {len(errors)}"]
-        if errors:
-            for idx, msg in errors[:5]:
-                snippet = prompts[idx][:30] if idx < len(prompts) else str(idx)
-                lines.append(f"失败[{idx}] {snippet}: {sanitize_text(msg)}")
-        api_text = "\n".join(lines)
-        return {"ui": {"string": [api_text]}, "result": (batch_tensor, api_text)}
+            fn_prefix = filename_prefix_list[i % len(filename_prefix_list)]
+            out_fn = None
+            if fn_prefix and str(fn_prefix).strip():
+                out_fn = f"{str(fn_prefix).strip()}_{i+1}"
+
+            task_data = {
+                "task_id": sub_task_id,
+                "api_key": api_key_val,
+                "api_url": api_url_val,
+                "model": model_val,
+                "use_proxy": use_proxy_val,
+                "resolution": resolution_list[i % len(resolution_list)],
+                "prompt": p,
+                "aspect_ratio": aspect_ratio_list[i % len(aspect_ratio_list)],
+                "wait_time": 0,
+                "seed": s_val,
+                "save_path": save_path_list[i % len(save_path_list)],
+                "save_format": save_format_list[i % len(save_format_list)],
+                "output_filename": out_fn,
+                "long_side": long_side_val,
+                "tensor_images": task_imgs
+            }
+            task_list.append(task_data)
+
+        # Background Monitor
+        def background_batch_monitor(tasks, max_workers, split_mode, interval):
+            total_tasks = len(tasks)
+            print(f"[ComfyUI-shaobkj-BG] [Concurrent-Batch] Monitor started for {total_tasks} tasks. (Workers: {max_workers})")
+            
+            success_count = 0
+            fail_count = 0
+            completed_count = 0
+            failure_reasons = []
+            lock = threading.Lock()
+            
+            def on_task_done(fut, tid):
+                nonlocal success_count, fail_count, completed_count
+                try:
+                    fut.result()
+                    is_success = True
+                    error_msg = None
+                except Exception as e:
+                    is_success = False
+                    error_msg = str(e)
+
+                with lock:
+                    completed_count += 1
+                    if is_success:
+                        success_count += 1
+                        status_str = "完成"
+                    else:
+                        fail_count += 1
+                        failure_reasons.append(f"{tid}: {error_msg}")
+                        status_str = f"失败: {error_msg}"
+                    
+                    print(f"[ComfyUI-shaobkj-BG] [Concurrent-Batch] {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count} | {tid} {status_str}")
+
+                    if completed_count == total_tasks:
+                        summary = f"[ComfyUI-shaobkj-BG] [Concurrent-Batch] 完成。总: {total_tasks} | 成功: {success_count} | 失败: {fail_count}"
+                        if fail_count > 0: summary += f" | 详情: {'; '.join(failure_reasons)}"
+                        print(summary)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for i, task_data in enumerate(tasks):
+                    if split_mode and interval > 0 and i > 0:
+                        time.sleep(interval)
+                    
+                    future = executor.submit(run_batch_generation_task, task_data)
+                    future.add_done_callback(lambda f, t=task_data["task_id"]: on_task_done(f, t))
+
+        # Launch Thread
+        max_workers = max_workers_val if max_workers_val > 0 else 1000
+        t = threading.Thread(target=background_batch_monitor, args=(task_list, max_workers, batch_split_val, submit_interval_val))
+        t.daemon = True
+        t.start()
+        
+        msg = f"已提交 {len(task_list)} 个生成任务到后台。"
+        print(f"[ComfyUI-shaobkj] {msg}")
+        
+        generated_ids = [t["task_id"] for t in task_list]
+        status_list = ["Submitted" for _ in task_list]
+        
+        return (generated_ids, status_list)

@@ -16,6 +16,8 @@ const DYNAMIC_NODES = [
     "Shaobkj -Veo视频",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "🤖并发-编辑-发送端",
+    "Shaobkj_APINode_Batch",
+    "🤖并发-文本-图像生成",
 ];
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",

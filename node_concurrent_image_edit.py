@@ -87,7 +87,7 @@ def run_concurrent_task_internal(data):
         prompt = data.get("prompt", "")
         aspect_ratio = data.get("aspect_ratio", "原图1比例")
         long_side = int(data.get("long_side", 1280))
-        wait_time = int(data.get("wait_time", 180))
+        wait_time = int(data.get("wait_time", 0))
         seed_val = int(data.get("seed", 0))
         save_path_input = data.get("save_path", "")
         save_format_input = data.get("save_format", "JPEG (默认95%)")
@@ -413,9 +413,9 @@ def run_concurrent_task_internal(data):
         elif "504" in err_msg or "Gateway Time-out" in err_msg:
              err_msg = "❌ 错误：请求超时 (504 Gateway Time-out)。服务器处理时间过长。"
         elif "Total execution time exceeded limit" in err_msg:
-             err_msg = f"❌ 错误：等待超时 ({int(wait_time)}秒)。任务执行时间超过了设定的'等待时间'。"
+             err_msg = f"❌ 错误：等待超时。任务执行时间超过了设定的限制。"
         elif "Read timed out" in err_msg or "Connect timed out" in err_msg:
-             err_msg = f"❌ 错误：网络连接超时。网络响应慢，或者等待时间 ({int(wait_time)}秒) 不足。"
+             err_msg = f"❌ 错误：网络连接超时。网络响应慢。"
              
         print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: {err_msg}")
         
@@ -478,7 +478,6 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
-                "等待时间": ("INT", {"default": 900, "min": 0, "max": 1000000}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "Batch拆分模式": ("BOOLEAN", {"default": True}),
                 "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)"}),
@@ -507,7 +506,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     CATEGORY = "🤖shaobkj-APIbox/Concurrent"
     OUTPUT_NODE = True
 
-    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 保存路径, **kwargs):
+    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 保存路径, seed, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True wraps everything in lists
         # We assume common parameters are same for all items (take first), OR we should support batching them too.
         # For simplicity, let's take the first item for "global" settings, but support batching for Prompts and Images.
@@ -535,8 +534,8 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             clean_kwargs[k] = v
 
         long_side_val = int(get_val(kwargs.get("输入图像-长边设置", [1280])))
-        wait_time_val = int(get_val(kwargs.get("等待时间", [900])))
-        seed_val = int(get_val(kwargs.get("seed", [0])))
+        wait_time_val = 0 # Default to infinite wait
+        seed_val = int(get_val(seed))
         batch_split_val = get_val(kwargs.get("Batch拆分模式", [True]))
         batch_align_val = get_val(kwargs.get("Batch对齐方式", ["循环补全(Max)"]))
         submit_interval_val = float(get_val(kwargs.get("并发间隔", [1.0])))
