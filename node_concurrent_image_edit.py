@@ -737,19 +737,37 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             success_count = 0
             fail_count = 0
             completed_count = 0
+            failure_reasons = []
             lock = threading.Lock()
             
             def on_task_done(fut, tid):
                 nonlocal success_count, fail_count, completed_count
+                
+                try:
+                    fut.result()
+                    is_success = True
+                    error_msg = None
+                except Exception as e:
+                    is_success = False
+                    error_msg = str(e)
+
                 with lock:
                     completed_count += 1
-                    try:
-                        fut.result()
+                    if is_success:
                         success_count += 1
-                        print(f"[ComfyUI-shaobkj-BG] 进度: {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count} | 任务 {tid} 完成")
-                    except Exception as e:
+                        status_str = "完成"
+                    else:
                         fail_count += 1
-                        print(f"[ComfyUI-shaobkj-BG] 进度: {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count} | 任务 {tid} 失败，原因: {str(e)}")
+                        failure_reasons.append(f"{tid}: {error_msg}")
+                        status_str = f"失败，原因: {error_msg}"
+                    
+                    print(f"[ComfyUI-shaobkj-BG] 进度: {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count} | 任务 {tid} {status_str}")
+
+                    if completed_count == total_tasks:
+                        summary = f"[ComfyUI-shaobkj-BG] 任务已全部完成。总计: {total_tasks} | 成功: {success_count} | 失败: {fail_count}"
+                        if fail_count > 0:
+                            summary += f" | 失败详情: {'; '.join(failure_reasons)}"
+                        print(summary)
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for i, task_data in enumerate(tasks):
@@ -760,8 +778,6 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                     future = executor.submit(run_concurrent_task_internal, task_data)
                     # Use lambda to capture task_id immediately
                     future.add_done_callback(lambda f, t=task_data["task_id"]: on_task_done(f, t))
-
-            print(f"[ComfyUI-shaobkj-BG] 所有任务结束。总计: {total_tasks} | 成功: {success_count} | 失败: {fail_count}")
 
         # Launch Thread
         # We can use max_workers=5 or similar
