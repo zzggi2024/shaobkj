@@ -81,26 +81,7 @@ app.registerExtension({
     
     // Optional: Listen for socket events to show success notification
     async setup() {
-        api.addEventListener("shaobkj.concurrent.success", (event) => {
-            const detail = event.detail;
-            if (detail && detail.filename) {
-                // Show user notification as requested
-                // Format: ✅ 发送成功，请到指定文件夹查看\nAPI响应: {detail}
-                // We don't have full API response in 'detail' yet, but we can show task info.
-                // Or user means "Output API response TO THE POPUP"?
-                // Let's assume user wants more details in the popup.
-                
-                const msg = `✅ 发送成功，请到指定文件夹查看\nAPI响应: ${detail.task_id}\n文件: ${detail.filename}`;
-                console.log("[Shaobkj] " + msg, detail);
-                
-                app.ui.dialog.show(msg);
-                
-                // Optional: Auto close after 3 seconds
-                setTimeout(() => {
-                    app.ui.dialog.close();
-                }, 3000);
-            }
-        });
+
         
         api.addEventListener("shaobkj.concurrent.error", (event) => {
             const detail = event.detail;
