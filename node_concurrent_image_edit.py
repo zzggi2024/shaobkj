@@ -67,7 +67,7 @@ def run_concurrent_task_internal(data):
     if not task_id_local:
         task_id_local = f"task_{int(time.time())}_{random.randint(1000,9999)}"
     
-    print(f"[ComfyUI-shaobkj] Starting concurrent task {task_id_local}...")
+    print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Starting concurrent task {task_id_local}...")
     
     # Initial status update
     update_async_task(task_id_local, {
@@ -108,7 +108,7 @@ def run_concurrent_task_internal(data):
                      img = ImageOps.exif_transpose(img)
                      pil_images.append(img)
              except Exception as e:
-                 print(f"[ComfyUI-shaobkj] Error loading uploaded image: {e}")
+                 print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Error loading uploaded image: {e}")
 
         # Process Additional Uploads (from JS dynamic inputs)
         additional_images = data.get("additional_images", [])
@@ -156,7 +156,7 @@ def run_concurrent_task_internal(data):
                         }
                     })
             except Exception as e:
-                print(f"[ComfyUI-shaobkj] Error encoding image: {e}")
+                print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Error encoding image: {e}")
 
         # Seed Logic
         safe_seed = seed_val
@@ -218,7 +218,7 @@ def run_concurrent_task_internal(data):
                 openai_json = openai_resp.json()
                 return extract_image_from_json(openai_json, session, proxies, api_key, api_origin, timeout_val=60)
             except Exception as e:
-                print(f"[ComfyUI-shaobkj] OpenAI Fallback failed: {e}")
+                print(f"[ComfyUI-shaobkj] [Concurrent-Sender] OpenAI Fallback failed: {e}")
                 return None
 
         def get_task_id_from_headers(resp):
@@ -245,14 +245,14 @@ def run_concurrent_task_internal(data):
         )
 
         if response.status_code == 524:
-            print(f"[ComfyUI-shaobkj] {task_id_local}: Warning: 524 Gateway Timeout, try OpenAI fallback")
+            print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: Warning: 524 Gateway Timeout, try OpenAI fallback")
             fallback_img = try_openai_fallback()
             if fallback_img:
                 extracted_img = fallback_img
                 # Skip to saving
                 res_json = {"status": "success", "fallback": True} 
             else:
-                print(f"[ComfyUI-shaobkj] {task_id_local}: Warning: 524 retry once")
+                print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: Warning: 524 retry once")
                 response = post_json_with_retry(
                     session,
                     url,
@@ -264,10 +264,10 @@ def run_concurrent_task_internal(data):
                 )
         
         if response.status_code not in (200, 201, 202):
-            print(f"[ComfyUI-shaobkj] {task_id_local}: API Error Status: {response.status_code}")
+            print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: API Error Status: {response.status_code}")
             # Try to read error body for logging
             try:
-                print(f"[ComfyUI-shaobkj] Error Body: {response.text[:200]}")
+                print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Error Body: {response.text[:200]}")
             except: pass
         
         response.raise_for_status()
@@ -278,12 +278,12 @@ def run_concurrent_task_internal(data):
              # Handle Empty Response Body
              raw_text = response.text
              if not raw_text or not raw_text.strip():
-                 print(f"[ComfyUI-shaobkj] {task_id_local}: Warning: Empty response body (HTTP {response.status_code})")
+                 print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: Warning: Empty response body (HTTP {response.status_code})")
                  task_id = get_task_id_from_headers(response)
                  if task_id:
                      res_json = {"id": task_id}
                  else:
-                     print(f"[ComfyUI-shaobkj] {task_id_local}: Trying OpenAI fallback due to empty response")
+                     print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: Trying OpenAI fallback due to empty response")
                      extracted_img = try_openai_fallback()
                      if extracted_img:
                          res_json = {"status": "success", "fallback": True}
@@ -343,7 +343,7 @@ def run_concurrent_task_internal(data):
                                  raise RuntimeError(f"Remote Task failed: {status}")
                      except Exception as e:
                          fail_count += 1
-                         print(f"[ComfyUI-shaobkj] Polling error: {e}")
+                         print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Polling error: {e}")
                          if fail_count > 10:
                              raise
 
@@ -380,7 +380,7 @@ def run_concurrent_task_internal(data):
                     os.makedirs(custom_dir, exist_ok=True)
                     out_dir = custom_dir
                 except Exception as e:
-                    print(f"[ComfyUI-shaobkj] Failed to create custom dir {custom_dir}, using default. Error: {e}")
+                    print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Failed to create custom dir {custom_dir}, using default. Error: {e}")
 
             out_path = os.path.join(out_dir, filename)
             
@@ -397,7 +397,7 @@ def run_concurrent_task_internal(data):
             
             extracted_img.save(out_path, **save_params)
             
-            print(f"[ComfyUI-shaobkj] {task_id_local}: Success! Saved to {out_path}")
+            print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: Success! Saved to {out_path}")
             
             # Record success in async manager
             update_async_task(task_id_local, {
@@ -428,7 +428,7 @@ def run_concurrent_task_internal(data):
         elif "500" in err_msg or "Internal Server Error" in err_msg:
              err_msg = "❌ 错误：API 服务端内部错误 (500 Internal Server Error)。"
              
-        print(f"[ComfyUI-shaobkj] {task_id_local}: {err_msg}")
+        print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: {err_msg}")
         
         # Record failure in async manager
         update_async_task(task_id_local, {
@@ -732,7 +732,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
         
         def background_batch_monitor(tasks, max_workers, split_mode, interval):
             total_tasks = len(tasks)
-            print(f"[ComfyUI-shaobkj-BG] Background monitor started for {total_tasks} tasks. (Max Workers: {max_workers}, Interval: {interval}s)")
+            print(f"[ComfyUI-shaobkj-BG] [Concurrent-Sender] Background monitor started for {total_tasks} tasks. (Max Workers: {max_workers}, Interval: {interval}s)")
             
             success_count = 0
             fail_count = 0
@@ -761,10 +761,10 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                         failure_reasons.append(f"{tid}: {error_msg}")
                         status_str = f"失败，原因: {error_msg}"
                     
-                    print(f"[ComfyUI-shaobkj-BG] 进度: {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count} | 任务 {tid} {status_str}")
+                    print(f"[ComfyUI-shaobkj-BG] [Concurrent-Sender] 进度: {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count} | 任务 {tid} {status_str}")
 
                     if completed_count == total_tasks:
-                        summary = f"[ComfyUI-shaobkj-BG] 任务已全部完成。总计: {total_tasks} | 成功: {success_count} | 失败: {fail_count}"
+                        summary = f"[ComfyUI-shaobkj-BG] [Concurrent-Sender] 任务已全部完成。总计: {total_tasks} | 成功: {success_count} | 失败: {fail_count}"
                         if fail_count > 0:
                             summary += f" | 失败详情: {'; '.join(failure_reasons)}"
                         print(summary)
