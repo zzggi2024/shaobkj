@@ -493,10 +493,10 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "Batch拆分模式": ("BOOLEAN", {"default": True}),
                 "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)"}),
-                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交之间的间隔时间(秒)"}),
-                "最大并发数": ("INT", {"default": 5, "min": 0, "max": 1000, "step": 1, "tooltip": "同时运行的任务数量，0表示不限制（慎用）"}),
+                "保存路径": ("STRING", {"default": "Shaobkj_Concurrent", "multiline": False}),
                 "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
-                "保存路径": ("STRING", {"default": "", "multiline": False, "placeholder": "默认为 output 目录"}),
+                "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数"}),
+                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交之间的间隔时间(秒)"}),
             },
             "optional": {
                  "文件名来源": ("STRING", {"forceInput": True, "multiline": False, "dynamicPrompts": False}),
