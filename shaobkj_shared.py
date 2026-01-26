@@ -13,6 +13,9 @@ import base64
 from urllib.parse import urlparse
 from datetime import datetime
 import subprocess
+import traceback
+import random
+import folder_paths
 
 import threading
 
@@ -272,6 +275,10 @@ def post_with_retry(
 
         except requests.exceptions.RequestException as e:
             last_exc = e
+            # CRITICAL: Never retry on ReadTimeout to prevent double billing
+            if isinstance(e, requests.exceptions.ReadTimeout):
+                raise
+            
             if attempt >= max_retries:
                 raise
             # Check if sleep would exceed total timeout

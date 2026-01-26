@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import base64
 import traceback
+import requests
 
 from .shaobkj_shared import (
     build_submit_timeout,
@@ -13,6 +14,8 @@ from .shaobkj_shared import (
     get_config_value,
     post_json_with_retry,
     resize_pil_long_side,
+    get_video_file_path,
+    compress_video_to_base64,
 )
 from comfy.utils import ProgressBar
 
@@ -41,6 +44,7 @@ class Shaobkj_Reverse_Node:
             "optional": {
                 "image_1": ("IMAGE",),
                 "image_2": ("IMAGE",),
+                "video": ("VIDEO",),
             },
         }
 
@@ -56,54 +60,20 @@ class Shaobkj_Reverse_Node:
         system_prompt = 系统提示词.strip() if isinstance(系统提示词, str) else ""
         user_prompt = 需求提示词.strip() if isinstance(需求提示词, str) else ""
         seed_value = seed
-        prompt = (system_prompt + "\n\n" if system_prompt else "") + user_prompt
+        
         timeout_val = None if int(等待时间) == 0 else int(等待时间)
+        submit_timeout = build_submit_timeout(int(等待时间))
+        
+        disable_insecure_request_warnings()
+        session, proxies = create_requests_session(bool(使用系统代理))
 
-        def extract_error(obj):
-            code = None
-            message = None
-            cur = obj
-            for _ in range(3):
-                if isinstance(cur, dict):
-                    code = cur.get("code") or code
-                    message = cur.get("message") if cur.get("message") is not None else message
-                    if isinstance(message, str):
-                        s = message.strip()
-                        if s.startswith("{") and s.endswith("}"):
-                            try:
-                                cur = json.loads(s)
-                                continue
-                            except Exception:
-                                pass
-                    if isinstance(message, dict):
-                        cur = message
-                        continue
-                break
-            return code, message
-
-        def raise_if_quota_error(status_code, payload):
-            code, message = extract_error(payload)
-            if code == "quota_not_enough":
-                raise RuntimeError("API 额度不足（quota_not_enough），请充值或更换 API Key。")
-            if code == "fail_to_fetch_task":
-                inner_code, inner_message = extract_error(message)
-                if inner_code == "quota_not_enough":
-                    raise RuntimeError("API 额度不足（quota_not_enough），请充值或更换 API Key。")
-                if isinstance(inner_message, str) and "quota_not_enough" in inner_message:
-                    raise RuntimeError("API 额度不足（quota_not_enough），请充值或更换 API Key。")
-            if isinstance(message, str) and "quota_not_enough" in message:
-                raise RuntimeError("API 额度不足（quota_not_enough），请充值或更换 API Key。")
-            
-            # Gemini specific error handling
-            if isinstance(payload, dict) and "error" in payload:
-                err = payload["error"]
-                if isinstance(err, dict):
-                     msg = err.get("message", "")
-                     if "quota" in msg.lower() or "limit" in msg.lower():
-                          print(f"[ComfyUI-shaobkj] Possible quota error: {msg}")
-
-            raise RuntimeError(f"API Error {status_code}: {payload}")
-
+        # ---------------------------------------------------------------------------
+        # 1. Prepare Content (Images & Video)
+        # ---------------------------------------------------------------------------
+        image_assets = [] # List of base64 strings
+        video_asset = None # Base64 string for video
+        
+        # Process Images
         input_images = []
         for i in range(1, 50):
             img_key = f"image_{i}"
@@ -111,17 +81,7 @@ class Shaobkj_Reverse_Node:
                 input_images.append(kwargs[img_key])
         if "图像" in kwargs and kwargs["图像"] is not None:
             input_images.append(kwargs["图像"])
-
-        if not api_key:
-            raise ValueError("API Key is required.")
-
-        if base_url.endswith("/v1"):
-            base_url = base_url[:-3]
-
-        url = f"{base_url}/v1beta/models/{model}:generateContent"
-
-        parts = [{"text": prompt}]
-
+            
         if len(input_images) > 0:
             for img_tensor_batch in input_images:
                 batch_size = img_tensor_batch.shape[0]
@@ -133,80 +93,182 @@ class Shaobkj_Reverse_Node:
                         img_u8 = np.clip(255.0 * np.array(img_tensor), 0, 255).astype(np.uint8)
                     pil_img = Image.fromarray(img_u8)
                     pil_img = resize_pil_long_side(pil_img, 长边设置)
-
                     buffered = io.BytesIO()
                     pil_img.save(buffered, format="JPEG", quality=85)
                     img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                    parts.append({"inline_data": {"mime_type": "image/jpeg", "data": img_b64}})
+                    image_assets.append(img_b64)
 
-        payload = {"contents": [{"role": "user", "parts": parts}]}
-        # 将 seed 放入 generationConfig，这才是 Gemini API 的标准做法
-        safe_seed = int(seed_value)
-        if safe_seed < 0:
-            safe_seed = 0
-        if safe_seed > 2147483647:
-            safe_seed = safe_seed % 2147483647
-        payload["generationConfig"] = {"seed": safe_seed}
+        # Process Video
+        if "video" in kwargs and kwargs["video"] is not None:
+            video_path = get_video_file_path(kwargs["video"])
+            if video_path:
+                print(f"[ComfyUI-shaobkj] Processing video for inference: {video_path}")
+                # Compress video (limit to 15s to be safe for prompt extraction)
+                video_asset = compress_video_to_base64(video_path, max_size_mb=20, duration_limit=15)
+                if video_asset:
+                    print(f"[ComfyUI-shaobkj] Video encoded successfully ({len(video_asset)//1024} KB)")
+                else:
+                    print(f"[ComfyUI-shaobkj] Video encoding failed.")
 
+        # ---------------------------------------------------------------------------
+        # 2. Define Protocols (OpenAI First, then Gemini)
+        # ---------------------------------------------------------------------------
+        protocols = []
+        
+        # Helper: Determine OpenAI base URL
+        # If url ends with /v1, remove it to get root, then append /v1/chat/completions
+        # If url doesn't end with /v1, assume it's root, append /v1/chat/completions
+        openai_base = base_url[:-3] if base_url.endswith("/v1") else base_url
+        openai_url = f"{openai_base}/v1/chat/completions"
+        
+        # --- Protocol A: OpenAI Compatible ---
+        openai_content = []
+        if user_prompt:
+            openai_content.append({"type": "text", "text": user_prompt})
+        
+        for img_b64 in image_assets:
+            openai_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+            })
+            
+        if video_asset:
+            # OpenAI format extension for video (commonly supported by Gemini wrappers)
+            openai_content.append({
+                "type": "video_url",
+                "video_url": {"url": f"data:video/mp4;base64,{video_asset}"}
+            })
+            
+        openai_messages = []
+        if system_prompt:
+            openai_messages.append({"role": "system", "content": system_prompt})
+        openai_messages.append({"role": "user", "content": openai_content})
+        
+        openai_payload = {
+            "model": model,
+            "messages": openai_messages,
+            "seed": seed_value if seed_value >= 0 else None,
+            "stream": False,
+            "max_tokens": 4096
+        }
+        # Clean payload
+        openai_payload = {k: v for k, v in openai_payload.items() if v is not None}
+        
+        protocols.append({
+            "name": "OpenAI Compatible",
+            "url": openai_url,
+            "headers": {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+            "payload": openai_payload,
+            "parser": "openai"
+        })
+        
+        # --- Protocol B: Gemini Native ---
+        gemini_url = f"{openai_base}/v1beta/models/{model}:generateContent"
+        
+        gemini_parts = []
+        full_prompt = (system_prompt + "\n\n" + user_prompt).strip()
+        if full_prompt:
+            gemini_parts.append({"text": full_prompt})
+            
+        for img_b64 in image_assets:
+            gemini_parts.append({
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": img_b64
+                }
+            })
+            
+        if video_asset:
+             gemini_parts.append({
+                "inline_data": {
+                    "mime_type": "video/mp4",
+                    "data": video_asset
+                }
+            })
+            
+        gemini_payload = {
+            "contents": [{"role": "user", "parts": gemini_parts}],
+            "generationConfig": {
+                "seed": seed_value if seed_value >= 0 else 0,
+                "maxOutputTokens": 4096
+            }
+        }
         if 谷歌搜索:
-            payload["tools"] = [{"googleSearch": {}}]
+            gemini_payload["tools"] = [{"googleSearch": {}}]
+            
+        protocols.append({
+            "name": "Gemini Native",
+            "url": gemini_url,
+            "headers": {"Content-Type": "application/json", "x-goog-api-key": api_key},
+            "payload": gemini_payload,
+            "parser": "gemini"
+        })
 
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key, "Authorization": f"Bearer {api_key}"}
-
-        print(f"[ComfyUI-shaobkj] Sending inference request to {base_url} (Model: {model})...")
+        # ---------------------------------------------------------------------------
+        # 3. Execute Protocols
+        # ---------------------------------------------------------------------------
+        last_error = None
         pbar = ProgressBar(100)
         pbar.update_absolute(0)
-
-        disable_insecure_request_warnings()
-        session, proxies = create_requests_session(bool(使用系统代理))
-        submit_timeout = build_submit_timeout(int(等待时间))
-
-        try:
-            response = post_json_with_retry(
-                session,
-                url,
-                headers=headers,
-                payload=payload,
-                timeout=submit_timeout,
-                proxies=proxies,
-                verify=False,
-            )
-
-            if response.status_code != 200:
-                print(f"[ComfyUI-shaobkj] API Error: {response.status_code}")
-                try:
-                    err_msg = response.json()
-                except Exception:
-                    err_msg = response.text
-                raise_if_quota_error(response.status_code, err_msg)
-
+        
+        for idx, proto in enumerate(protocols):
+            print(f"[ComfyUI-shaobkj] Trying Protocol: {proto['name']} ({proto['url']})...")
             try:
-                res_json = response.json()
-            except (json.JSONDecodeError, ValueError) as e:
-                raw_text = response.text
-                if not raw_text or not raw_text.strip():
-                    raise RuntimeError(f"API Error: Empty response body (HTTP {response.status_code})")
-                raise RuntimeError(f"Invalid JSON response from API: {e}")
-            pbar.update_absolute(60)
-
-            generated_text = ""
-            if "candidates" in res_json and len(res_json["candidates"]) > 0:
-                candidate = res_json["candidates"][0]
-                if "content" in candidate and "parts" in candidate["content"]:
-                    for part in candidate["content"]["parts"]:
-                        if "text" in part:
-                            generated_text += part["text"]
-
-            if not generated_text:
-                generated_text = "No text response generated."
-            pbar.update_absolute(100)
-            api_resp_text = json.dumps(res_json, ensure_ascii=False)
-            if not isinstance(api_resp_text, str):
-                api_resp_text = str(api_resp_text)
-            if len(api_resp_text) > 8000:
-                api_resp_text = api_resp_text[:8000] + "...(truncated)"
-            return (generated_text, api_resp_text)
-        except Exception as e:
-            error_msg = f"Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            print(f"[ComfyUI-shaobkj] Inference Error: {error_msg}")
-            raise RuntimeError(f"Inference Failed: {str(e)}") from e
+                # Use a shorter timeout for the first attempt if we have fallback? 
+                # No, give it proper time.
+                response = post_json_with_retry(
+                    session,
+                    proto['url'],
+                    headers=proto['headers'],
+                    payload=proto['payload'],
+                    timeout=submit_timeout,
+                    proxies=proxies,
+                    verify=False,
+                    max_retries=1 # Retry logic is handled by switching protocols
+                )
+                
+                if response.status_code == 200:
+                    try:
+                        res_json = response.json()
+                        pbar.update_absolute(100)
+                        
+                        # Parse Result
+                        generated_text = ""
+                        if proto['parser'] == "openai":
+                            if "choices" in res_json and len(res_json["choices"]) > 0:
+                                generated_text = res_json["choices"][0]["message"]["content"]
+                        elif proto['parser'] == "gemini":
+                            if "candidates" in res_json and len(res_json["candidates"]) > 0:
+                                parts = res_json["candidates"][0].get("content", {}).get("parts", [])
+                                for part in parts:
+                                    if "text" in part:
+                                        generated_text += part["text"]
+                        
+                        if not generated_text:
+                            # Try generic extraction if parser specific failed
+                            print(f"[ComfyUI-shaobkj] Warning: Parser {proto['parser']} yielded no text. Dumping JSON.")
+                            generated_text = json.dumps(res_json, ensure_ascii=False)
+                            
+                        return (generated_text, json.dumps(res_json, ensure_ascii=False))
+                        
+                    except json.JSONDecodeError:
+                        print(f"[ComfyUI-shaobkj] Invalid JSON from {proto['name']}")
+                else:
+                    print(f"[ComfyUI-shaobkj] {proto['name']} Failed: HTTP {response.status_code}")
+                    try:
+                        err_body = response.text
+                    except:
+                        err_body = "Unknown Error"
+                    last_error = f"{proto['name']} HTTP {response.status_code}: {err_body[:200]}"
+                    
+            except Exception as e:
+                print(f"[ComfyUI-shaobkj] {proto['name']} Exception: {e}")
+                last_error = f"{proto['name']} Error: {str(e)}"
+                
+            # If we are here, this protocol failed. Loop continues to next protocol.
+        
+        # All protocols failed
+        pbar.update_absolute(100)
+        error_msg = f"All inference protocols failed.\nLast Error: {last_error}"
+        print(f"[ComfyUI-shaobkj] {error_msg}")
+        raise RuntimeError(error_msg)
