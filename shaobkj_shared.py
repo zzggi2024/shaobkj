@@ -95,7 +95,17 @@ def tensor_to_pil(image):
 
 def pil_to_tensor(image):
     pil = image.convert("RGB") if hasattr(image, "convert") else image
-    return torch.from_numpy(np.array(pil).astype(np.float32) / 255.0).unsqueeze(0)
+    width, height = pil.size
+    
+    # Optimized conversion: use tobytes + frombuffer to avoid unnecessary copy
+    # This is faster than np.array(pil)
+    try:
+        img_bytes = pil.tobytes()
+        img_array = np.frombuffer(img_bytes, dtype=np.uint8).reshape(height, width, 3)
+        return torch.from_numpy(img_array.astype(np.float32) / 255.0).unsqueeze(0)
+    except Exception:
+        # Fallback to standard method if optimization fails
+        return torch.from_numpy(np.array(pil).astype(np.float32) / 255.0).unsqueeze(0)
 
 
 def resize_pil_long_side(image, long_side):
