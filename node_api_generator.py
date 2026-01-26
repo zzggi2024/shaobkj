@@ -187,7 +187,8 @@ class Shaobkj_APINode:
 
         model = 模型选择
 
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key, "Authorization": f"Bearer {api_key}"}
+        # Fix: Remove Authorization header for Gemini to improve proxy compatibility (align with ModeHub)
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
 
         url = f"{gemini_base}/v1beta/models/{model}:generateContent"
 
@@ -308,6 +309,11 @@ class Shaobkj_APINode:
         t_progress.start()
 
         def try_openai_fallback():
+            # Strict mode: Disable fallback for high resolution requests
+            if str(resolution).lower() in ["2k", "4k"]:
+                print(f"[ComfyUI-shaobkj] Fallback disabled for {resolution} resolution to prevent quality degradation.")
+                return None
+
             openai_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
             openai_url = f"{openai_base}/v1/chat/completions"
             openai_headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}

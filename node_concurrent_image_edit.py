@@ -135,7 +135,8 @@ def run_concurrent_task_internal(data):
         api_origin = urlparse(base_origin).netloc
         
         url = f"{base_origin}/v1beta/models/{model}:generateContent"
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key, "Authorization": f"Bearer {api_key}"}
+        # Fix: Remove Authorization header for Gemini to improve proxy compatibility (align with ModeHub)
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
         # Force generation instruction
         final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"

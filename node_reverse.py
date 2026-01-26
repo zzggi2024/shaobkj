@@ -151,7 +151,8 @@ class Shaobkj_Reverse_Node:
         if 谷歌搜索:
             payload["tools"] = [{"googleSearch": {}}]
 
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key, "Authorization": f"Bearer {api_key}"}
+        # Fix: Remove Authorization header for Gemini to improve proxy compatibility (align with ModeHub)
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
 
         print(f"[ComfyUI-shaobkj] Sending inference request to {base_url} (Model: {model})...")
         pbar = ProgressBar(100)
