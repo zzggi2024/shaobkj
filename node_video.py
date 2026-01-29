@@ -232,7 +232,7 @@ class Shaobkj_Sora_Video:
         if resp.status_code != 200:
             try:
                 err_msg = resp.json()
-            except:
+            except Exception:
                 err_msg = resp.text
             
             error_text = f"API Error {resp.status_code}: {err_msg}"
@@ -245,11 +245,11 @@ class Shaobkj_Sora_Video:
                      try:
                         j = json.loads(err_msg)
                         raise_if_quota_error(resp.status_code, j)
-                     except:
+                     except Exception:
                         pass
             except RuntimeError:
                 raise
-            except:
+            except Exception:
                 pass
             raise RuntimeError(f"API Error {resp.status_code}: {err_msg}")
 
@@ -373,7 +373,7 @@ class Shaobkj_Sora_Video:
                     prog_val = 0
                 if prog_val > 100:
                     prog_val = 100
-            except:
+            except Exception:
                 prog_val = None
 
             prog_disp = int(prog_val) if prog_val is not None else str(progress)

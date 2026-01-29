@@ -700,7 +700,8 @@ def run_batch_generation_task(data):
             print(f"[ComfyUI-shaobkj] [Concurrent-Batch] {task_id_local}: API Error Status: {response.status_code}")
             try:
                 print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Error Body: {response.text[:200]}")
-            except: pass
+            except Exception:
+                pass
         
         response.raise_for_status()
         
@@ -968,7 +969,7 @@ class Shaobkj_APINode_Batch:
                 # Actually, let's just append p.
                 # But wait, if user pastes a list of prompts separated by newlines, they expect batch.
                 # So I'll keep the splitting logic if it's a single input item.
-                lines = [l.strip() for l in p.splitlines() if l.strip()]
+                lines = [line.strip() for line in p.splitlines() if line.strip()]
                 prompts.extend(lines)
             else:
                 prompts.append(str(p))

@@ -252,7 +252,8 @@ def run_concurrent_task_internal(data):
             # Try to read error body for logging
             try:
                 print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Error Body: {response.text[:200]}")
-            except: pass
+            except Exception:
+                pass
         
         response.raise_for_status()
         
@@ -504,7 +505,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("API响应", "状态")
     FUNCTION = "submit_task"
-    CATEGORY = "🤖shaobkj-APIbox/Concurrent"
+    CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
     def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 保存路径, seed, **kwargs):
@@ -792,6 +793,52 @@ class Shaobkj_ConcurrentImageEdit_Sender:
 # ----------------------------------------------------------------------------
 # Node C: Load Batch Images From Path
 # ----------------------------------------------------------------------------
+class Shaobkj_Load_Image_Path:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        input_dir = folder_paths.get_input_directory()
+        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+        files = folder_paths.filter_files_content_types(files, ["image"])
+        return {
+            "required": {
+                "image": (sorted(files), {"image_upload": True}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
+    RETURN_NAMES = ("image", "mask", "filename")
+    FUNCTION = "load_image"
+    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+
+    def load_image(self, image):
+        image_path = folder_paths.get_annotated_filepath(image)
+        if not image_path or not os.path.exists(image_path):
+            raise ValueError(f"❌ 错误：文件不存在: {image}")
+        if not os.path.isfile(image_path):
+            raise ValueError(f"❌ 错误：不是有效文件: {image}")
+
+        img = Image.open(image_path)
+        img = ImageOps.exif_transpose(img)
+
+        if img.mode == "I":
+            img = img.point(lambda i: i * (1 / 255))
+        image = img.convert("RGB")
+        image = np.array(image).astype(np.float32) / 255.0
+        image = torch.from_numpy(image)[None,]
+
+        if "A" in img.getbands():
+            mask = np.array(img.getchannel("A")).astype(np.float32) / 255.0
+            mask = 1.0 - torch.from_numpy(mask)
+        else:
+            mask = torch.zeros((image.shape[1], image.shape[2]), dtype=torch.float32, device="cpu")
+
+        filename = os.path.basename(image_path)
+        return (image, mask, filename)
+
+
 class Shaobkj_Load_Batch_Images:
     def __init__(self):
         pass
@@ -821,7 +868,6 @@ class Shaobkj_Load_Batch_Images:
         valid_extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
         file_list = []
         
-        # 1. Scan Directory
         try:
             for f in os.listdir(folder_path):
                 ext = os.path.splitext(f)[1].lower()
@@ -832,7 +878,6 @@ class Shaobkj_Load_Batch_Images:
         except Exception as e:
             raise ValueError(f"❌ 错误：读取文件夹失败: {e}")
 
-        # 2. Sort Logic
         if sort_method == "numerical":
              def natural_sort_key(s):
                  parts = re.split('([0-9]+)', s)
@@ -855,12 +900,11 @@ class Shaobkj_Load_Batch_Images:
         elif sort_method == "date":
              file_list.sort(key=lambda x: os.path.getmtime(x))
         else:
-             file_list.sort() # Default
+             file_list.sort()
         
-        # 3. Apply Index & Cap
         if start_index > 0:
             if start_index >= len(file_list):
-                 file_list = [] # Out of bounds
+                 file_list = []
             else:
                  file_list = file_list[start_index:]
         
@@ -871,8 +915,6 @@ class Shaobkj_Load_Batch_Images:
              raise ValueError(f"❌ 错误：文件夹为空或筛选后无有效图片: {folder_path}")
 
         print(f"[Shaobkj-Loader] Found {len(file_list)} images in {folder_path}")
-
-        # 4. Load Images (List Mode = Original Size)
         
         images_out = []
         masks_out = []
@@ -883,16 +925,12 @@ class Shaobkj_Load_Batch_Images:
                 img = Image.open(file_path)
                 img = ImageOps.exif_transpose(img)
                 
-                # No resize - keep original size
-                
-                # Process Image
                 if img.mode == 'I':
                     img = img.point(lambda i: i * (1 / 255))
                 image = img.convert("RGB")
                 image = np.array(image).astype(np.float32) / 255.0
-                image = torch.from_numpy(image)[None,] # [1, H, W, C]
+                image = torch.from_numpy(image)[None,]
                 
-                # Process Mask
                 if 'A' in img.getbands():
                     mask = np.array(img.getchannel('A')).astype(np.float32) / 255.0
                     mask = 1. - torch.from_numpy(mask)
@@ -917,10 +955,12 @@ class Shaobkj_Load_Batch_Images:
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
+    "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
     "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-文本-图像生成 (Sender)",
+    "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
+    "Shaobkj_Load_Image_Path": "🤖加载图像",
     "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)"
 }

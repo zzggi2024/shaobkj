@@ -139,7 +139,7 @@ class Shaobkj_LLM_App:
             # streamGenerateContent returns a list of JSON objects (chunks)
             try:
                 data = response.json()
-            except:
+            except Exception:
                 # If json() fails, it might be NDJSON or raw text
                 text_response = response.text
                 # Try to parse as NDJSON
@@ -148,7 +148,7 @@ class Shaobkj_LLM_App:
                     if line.strip():
                         try:
                             data.append(json.loads(line))
-                        except:
+                        except Exception:
                             pass
                             
             # Aggregate text from all parts

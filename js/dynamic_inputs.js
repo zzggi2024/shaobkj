@@ -15,9 +15,9 @@ const DYNAMIC_NODES = [
     "Shaobkj -Sora视频",
     "Shaobkj -Veo视频",
     "Shaobkj_ConcurrentImageEdit_Sender",
-    "🤖并发-编辑-发送端",
+    "🤖并发-编辑-图像驱动",
     "Shaobkj_APINode_Batch",
-    "🤖并发-文本-图像生成",
+    "🤖并发-编辑-文本驱动",
     "Shaobkj_LLM_App",
     "🤖LLM应用",
 ];
@@ -34,6 +34,7 @@ const MIN_INPUTS = 2;
 let started = false;
 const LONG_SIDE_WIDGET_NAME = "长边设置";
 const LONG_SIDE_WIDGET_LABEL = "输入图像-长边设置";
+const UPLOAD_LABEL_TEXT = "选择上传图像";
 
 // 🎨 Shaobkj Cyber-Spectrum Theme Definition
 const THEME_CONFIG = {
@@ -42,7 +43,7 @@ const THEME_CONFIG = {
     "Shaobkj_APINode_Batch": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
-    "🤖并发-文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🤖并发-编辑-文本驱动": { color: "#7D24A6", bgcolor: "#1E0A29" },
 
     // 🎬 导演系列 (视频生成) - Future Blue
     "Shaobkj_Sora_Video": { color: "#0091EA", bgcolor: "#001A2E" },
@@ -56,7 +57,7 @@ const THEME_CONFIG = {
     "Shaobkj_ConcurrentImageEdit_Sender": { color: "#00C853", bgcolor: "#003311" },
     "Shaobkj_Reverse_Node": { color: "#00C853", bgcolor: "#003311" },
     "🤖 Shaobkj 反推": { color: "#00C853", bgcolor: "#003311" },
-    "🤖并发-编辑-发送端": { color: "#00C853", bgcolor: "#003311" },
+    "🤖并发-编辑-图像驱动": { color: "#00C853", bgcolor: "#003311" },
     "Shaobkj 反推": { color: "#00C853", bgcolor: "#003311" }
 };
 
@@ -128,6 +129,12 @@ function isShaobkjRuntimeNode(node) {
         return true;
     }
     return false;
+}
+
+function isShaobkjLoadImageNode(node) {
+    const t = node?.type;
+    const title = node?.title;
+    return t === "Shaobkj_Load_Image_Path" || title === "🤖加载图像";
 }
 
 let shaobkjTitleHookInstalled = false;
@@ -332,6 +339,36 @@ function setupLongSideWidget(node) {
     return false;
 }
 
+function setupUploadButtonLabel(node) {
+    if (!isShaobkjLoadImageNode(node)) return false;
+    if (!node.widgets) return false;
+    let changed = false;
+    for (const w of node.widgets) {
+        const label = typeof w.label === "string" ? w.label : "";
+        const name = typeof w.name === "string" ? w.name : "";
+        const value = typeof w.value === "string" ? w.value : "";
+        const text = (label || name || value).trim().toLowerCase();
+        if (text === "upload") {
+            if (w.label !== UPLOAD_LABEL_TEXT) {
+                w.label = UPLOAD_LABEL_TEXT;
+                changed = true;
+            }
+            if (w.name === "upload") {
+                w.name = UPLOAD_LABEL_TEXT;
+                changed = true;
+            }
+            if (w.value === "upload") {
+                w.value = UPLOAD_LABEL_TEXT;
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
+}
+
 function setupNodeStyle(node) {
     if (!isShaobkjRuntimeNode(node)) return;
     
@@ -387,6 +424,7 @@ app.registerExtension({
                     setupNodeStyle(node);
                     setupLinkWidget(node);
                     setupLongSideWidget(node);
+                    setupUploadButtonLabel(node);
                     if (shouldManageDynamicInputsByNode(node)) {
                         manageInputs(node);
                     } else if (node.inputs && Array.isArray(node.inputs) && node.inputs.length) {
@@ -446,6 +484,7 @@ app.registerExtension({
                     setupNodeStyle(this);
                     setupLinkWidget(this);
                     setupLongSideWidget(this);
+                    setupUploadButtonLabel(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
                     if (needsDynamicInputs) manageInputs(this, true);
                 }, 50);

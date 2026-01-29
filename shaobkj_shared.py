@@ -175,7 +175,7 @@ def create_requests_session(use_system_proxy: bool):
     session.trust_env = bool(use_system_proxy)
     if not use_system_proxy:
         session.proxies = {}
-    proxies = {} if not use_system_proxy else None
+    proxies: dict | None = {} if not use_system_proxy else None
     return session, proxies
 
 
@@ -650,8 +650,10 @@ def robust_download_video(video_url, output_path, max_retries=3, timeout=300, he
         print(f"[Shaobkj-Downloader] yt-dlp failed: {e}")
         # Clean up potential partial file
         if os.path.exists(output_path):
-            try: os.remove(output_path)
-            except: pass
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
 
     # 2. Fallback to Curl
     curl_path = shutil.which("curl")
@@ -714,7 +716,7 @@ def save_local_record(record_type, id_val, remark, source_info):
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     old_content = f.read()
-            except:
+            except Exception:
                 pass
         
         with open(file_path, "w", encoding="utf-8") as f:
