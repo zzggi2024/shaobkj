@@ -4,6 +4,7 @@ from .node_video import Shaobkj_Sora_Video
 from .node_veo_video import Shaobkj_Veo_Video
 from .node_concurrent_image_edit import Shaobkj_ConcurrentImageEdit_Sender, Shaobkj_Load_Batch_Images
 from .node_jimeng_avatar import Shaobkj_Jimeng_Avatar
+from .node_llm_app import Shaobkj_LLM_App
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
@@ -14,6 +15,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
     "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
     "Shaobkj_Jimeng_Avatar": Shaobkj_Jimeng_Avatar,
+    "Shaobkj_LLM_App": Shaobkj_LLM_App,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -25,6 +27,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-发送端",
     "Shaobkj_Load_Batch_Images": "🤖批量加载图像(路径)",
     "Shaobkj_Jimeng_Avatar": "🤖即梦数字人（待测试）",
+    "Shaobkj_LLM_App": "🤖LLM应用",
 }
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")

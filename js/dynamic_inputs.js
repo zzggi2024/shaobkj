@@ -18,6 +18,8 @@ const DYNAMIC_NODES = [
     "🤖并发-编辑-发送端",
     "Shaobkj_APINode_Batch",
     "🤖并发-文本-图像生成",
+    "Shaobkj_LLM_App",
+    "🤖LLM应用",
 ];
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
@@ -26,6 +28,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
     "Shaobkj_ConcurrentImageEdit_Sender",
+    "Shaobkj_LLM_App",
 ];
 const MIN_INPUTS = 2;
 let started = false;
