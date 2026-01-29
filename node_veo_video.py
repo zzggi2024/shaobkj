@@ -37,7 +37,7 @@ class Shaobkj_Veo_Video:
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
                 "模型": (["veo_3_1", "veo_3_1-fast"], {"default": "veo_3_1"}),
-                "使用系统代理": ("BOOLEAN", {"default": False}),
+                "使用系统代理": ("BOOLEAN", {"default": True}),
                 "任务类型": (["智能模式", "文生视频", "图生视频"], {"default": "智能模式"}),
                 "提示词": ("STRING", {"multiline": True, "default": "画面动起来"}),
                 "生成时长": (["5", "8", "10", "15"], {"default": "8"}),

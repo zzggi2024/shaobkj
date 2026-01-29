@@ -407,6 +407,19 @@ app.registerExtension({
             }
         };
         setTimeout(tick, 200);
+
+        import("/scripts/api.js").then(({ api }) => {
+            api.addEventListener("shaobkj.llm.warning", (evt) => {
+                const msg = (evt && evt.detail && evt.detail.message) ? evt.detail.message : "⚠️ LLM 输出为空";
+                if (app?.ui?.dialog?.show) {
+                    app.ui.dialog.show(msg);
+                    setTimeout(() => { app.ui.dialog.close(); }, 1500);
+                } else {
+                    alert(msg);
+                }
+            });
+        }).catch(() => {
+        });
     },
     async init(app) {
         return this.setup(app);

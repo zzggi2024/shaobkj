@@ -2,6 +2,7 @@ import json
 import re
 import requests
 from urllib.parse import urlparse
+from server import PromptServer
 from .shaobkj_shared import (
     get_config_value,
     post_json_with_retry,
@@ -24,10 +25,10 @@ class Shaobkj_LLM_App:
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
                 "模型名称": ("STRING", {"default": "gemini-3-pro-preview", "multiline": False}),
-                "使用系统代理": ("BOOLEAN", {"default": False}),
+                "使用系统代理": ("BOOLEAN", {"default": True}),
                 "系统指令": ("STRING", {"default": "你是一个有用的助手。", "multiline": True}),
                 "用户输入": ("STRING", {"default": "", "multiline": True}),
-                "思考模式": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭"}),
+                "思考模式": ("BOOLEAN", {"default": False, "label_on": "开启", "label_off": "关闭"}),
                 "思考预算": ("INT", {"default": 10240, "min": 1024, "max": 65536, "step": 1024}),
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.1}),
                 "topP": ("FLOAT", {"default": 0.95, "min": 0.0, "max": 1.0, "step": 0.01}),
@@ -173,6 +174,11 @@ class Shaobkj_LLM_App:
                 # Fallback for unexpected format
                 full_text = str(data)
 
+            if isinstance(full_text, str) and not full_text.strip():
+                PromptServer.instance.send_sync(
+                    "shaobkj.llm.warning",
+                    {"message": "⚠️ 输出为空，请检查输入内容或接口返回。"}
+                )
             return (full_text,)
 
         except Exception as e:

@@ -31,7 +31,7 @@ class Shaobkj_Reverse_Node:
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
                 "模型名称": (["gemini-2.5-flash", "gemini-1.5-pro", "gemini-1.5-flash"], {"default": "gemini-2.5-flash"}),
-                "使用系统代理": ("BOOLEAN", {"default": False}),
+                "使用系统代理": ("BOOLEAN", {"default": True}),
                 "长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "等待时间": ("INT", {"default": 0, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),

@@ -61,7 +61,7 @@ class Shaobkj_APINode:
                     ],
                     {"default": "gemini-3-pro-image-preview"},
                 ),
-                "使用系统代理": ("BOOLEAN", {"default": False}),
+                "使用系统代理": ("BOOLEAN", {"default": True}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (
                     ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
@@ -854,7 +854,7 @@ class Shaobkj_APINode_Batch:
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
                 "模型选择": (["gemini-3-pro-image-preview"], {"default": "gemini-3-pro-image-preview"}),
-                "使用系统代理": ("BOOLEAN", {"default": False}),
+                "使用系统代理": ("BOOLEAN", {"default": True}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (
                     ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
