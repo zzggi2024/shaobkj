@@ -30,7 +30,9 @@ from .shaobkj_shared import (
     sanitize_text,
     update_async_task,
     get_all_async_tasks,
-    pil_to_tensor
+    pil_to_tensor,
+    estimate_subject_ratio,
+    map_ratio_to_aspect_ratio,
 )
 
 def get_closest_aspect_ratio(width, height):
@@ -177,7 +179,13 @@ def run_concurrent_task_internal(data):
         payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
 
         target_aspect_ratio = aspect_ratio
-        if target_aspect_ratio == "原图1比例" and len(pil_images) > 0:
+        if target_aspect_ratio == "智能比例":
+            if len(pil_images) > 0:
+                smart_ratio = estimate_subject_ratio(pil_images[0])
+                target_aspect_ratio = map_ratio_to_aspect_ratio(smart_ratio)
+            else:
+                target_aspect_ratio = "1:1"
+        elif target_aspect_ratio == "原图1比例" and len(pil_images) > 0:
              # Calculate from first image (assuming image_1 is first in list)
              w, h = pil_images[0].size
              target_aspect_ratio = get_closest_aspect_ratio(w, h)
@@ -478,7 +486,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 "模型选择": (["gemini-3-pro-image-preview"], {"default": "gemini-3-pro-image-preview"}),
                 "使用系统代理": ("BOOLEAN", {"default": True}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
-                "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例"}),
+                "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例", "智能比例"], {"default": "原图1比例"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "Batch拆分模式": ("BOOLEAN", {"default": True}),

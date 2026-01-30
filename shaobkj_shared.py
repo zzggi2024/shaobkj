@@ -108,6 +108,122 @@ def pil_to_tensor(image):
         return torch.from_numpy(np.array(pil).astype(np.float32) / 255.0).unsqueeze(0)
 
 
+def estimate_subject_ratio(image):
+    if image is None:
+        return 1.0
+    try:
+        img = image.convert("RGB") if hasattr(image, "convert") else image
+        arr = np.array(img).astype(np.float32)
+        if arr.ndim != 3:
+            w, h = img.size
+            return float(w) / float(h)
+        h, w = arr.shape[:2]
+        if h <= 0 or w <= 0:
+            return 1.0
+        border = np.concatenate([arr[0], arr[-1], arr[:, 0], arr[:, -1]], axis=0)
+        if border.size == 0:
+            return float(w) / float(h)
+        bg = np.median(border, axis=0)
+        diff = np.linalg.norm(arr - bg, axis=2)
+        if diff.size == 0:
+            return float(w) / float(h)
+        thresh = np.percentile(diff, 70)
+        if thresh < 8:
+            thresh = 8
+        mask = diff > thresh
+        if mask.sum() < max(1, int(0.002 * h * w)):
+            return float(w) / float(h)
+        keep = mask.copy()
+        min_area = max(1, int(0.002 * h * w))
+        edge_thresh = np.percentile(diff, 85)
+        if edge_thresh < 10:
+            edge_thresh = 10
+        edge_mask = diff > edge_thresh
+        best_score = 0.0
+        best_bbox = None
+        for y in range(h):
+            for x in range(w):
+                if not keep[y, x]:
+                    continue
+                stack = [(y, x)]
+                keep[y, x] = False
+                ys_list = []
+                xs_list = []
+                area = 0
+                edge_count = 0
+                while stack:
+                    cy, cx = stack.pop()
+                    area += 1
+                    ys_list.append(cy)
+                    xs_list.append(cx)
+                    if edge_mask[cy, cx]:
+                        edge_count += 1
+                    if cy > 0 and keep[cy - 1, cx]:
+                        keep[cy - 1, cx] = False
+                        stack.append((cy - 1, cx))
+                    if cy + 1 < h and keep[cy + 1, cx]:
+                        keep[cy + 1, cx] = False
+                        stack.append((cy + 1, cx))
+                    if cx > 0 and keep[cy, cx - 1]:
+                        keep[cy, cx - 1] = False
+                        stack.append((cy, cx - 1))
+                    if cx + 1 < w and keep[cy, cx + 1]:
+                        keep[cy, cx + 1] = False
+                        stack.append((cy, cx + 1))
+                if area < min_area:
+                    continue
+                y0, y1 = int(min(ys_list)), int(max(ys_list))
+                x0, x1 = int(min(xs_list)), int(max(xs_list))
+                bw = max(1, x1 - x0 + 1)
+                bh = max(1, y1 - y0 + 1)
+                area_ratio = float(area) / float(h * w)
+                edge_density = float(edge_count) / float(area)
+                score = (area_ratio ** 0.5) * (edge_density + 0.001)
+                if score > best_score:
+                    best_score = score
+                    best_bbox = (bw, bh)
+        if best_bbox is None:
+            ys, xs = np.where(mask)
+            if ys.size == 0:
+                return float(w) / float(h)
+            y0, y1 = int(ys.min()), int(ys.max())
+            x0, x1 = int(xs.min()), int(xs.max())
+            bw = max(1, x1 - x0 + 1)
+            bh = max(1, y1 - y0 + 1)
+            return float(bw) / float(bh)
+        return float(best_bbox[0]) / float(best_bbox[1])
+    except Exception:
+        try:
+            w, h = image.size
+            return float(w) / float(h)
+        except Exception:
+            return 1.0
+
+
+def map_ratio_to_aspect_ratio(ratio):
+    try:
+        r = float(ratio)
+    except Exception:
+        return "1:1"
+    if r <= 0:
+        return "1:1"
+    if r < 1.0:
+        if r <= 0.62:
+            return "9:16"
+        if r <= 0.72:
+            return "2:3"
+        if r <= 0.86:
+            return "3:4"
+        return "1:1"
+    if r <= 1.1:
+        return "1:1"
+    if r <= 1.35:
+        return "4:3"
+    if r <= 1.85:
+        return "16:9"
+    return "21:9"
+
+
 def resize_pil_long_side(image, long_side):
     try:
         target = int(long_side)

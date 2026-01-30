@@ -25,11 +25,14 @@ from .shaobkj_shared import (
     extract_image_from_json,
     get_config_value,
     pil_to_tensor,
+    tensor_to_pil,
     post_json_with_retry,
     save_local_record,
     update_async_task,
     get_all_async_tasks,
     resize_and_encode_image,
+    estimate_subject_ratio,
+    map_ratio_to_aspect_ratio,
 )
 from comfy.utils import ProgressBar
 
@@ -64,7 +67,7 @@ class Shaobkj_APINode:
                 "使用系统代理": ("BOOLEAN", {"default": True}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (
-                    ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
+                    ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例", "智能比例"],
                     {"default": "原图1比例"},
                 ),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
@@ -206,12 +209,14 @@ class Shaobkj_APINode:
         image_inputs.sort(key=lambda x: int(x[0].split("_")[1]))
         
         first_image_ratio = None
+        first_image_pil = None
         
         image_b64_list = []
         for idx, (name, tensor) in enumerate(image_inputs):
             b64_str, ratio = self.resize_and_encode_image(tensor, long_side_limit)
             if idx == 0:
                 first_image_ratio = ratio
+                first_image_pil = tensor_to_pil(tensor)
             if b64_str:
                 image_b64_list.append(b64_str)
                 parts.append({
@@ -232,7 +237,15 @@ class Shaobkj_APINode:
         payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
         
         api_aspect_ratio = None
-        if aspect_ratio == "原图1比例":
+        if aspect_ratio == "智能比例":
+            if first_image_pil is not None:
+                smart_ratio = estimate_subject_ratio(first_image_pil)
+                api_aspect_ratio = map_ratio_to_aspect_ratio(smart_ratio)
+            elif first_image_ratio is not None:
+                api_aspect_ratio = map_ratio_to_aspect_ratio(first_image_ratio)
+            else:
+                api_aspect_ratio = "1:1"
+        elif aspect_ratio == "原图1比例":
             if first_image_ratio is not None:
                 # Snap ratio string for API param
                 api_aspect_ratio = self.snap_to_aspect_ratio(first_image_ratio)
@@ -655,8 +668,13 @@ def run_batch_generation_task(data):
 
         target_aspect_ratio = aspect_ratio
         
-        # Resolve "原图1比例"
-        if target_aspect_ratio == "原图1比例":
+        if target_aspect_ratio == "智能比例":
+            if tensor_images:
+                smart_ratio = estimate_subject_ratio(tensor_images[0])
+                target_aspect_ratio = map_ratio_to_aspect_ratio(smart_ratio)
+            else:
+                target_aspect_ratio = "1:1"
+        elif target_aspect_ratio == "原图1比例":
             if first_image_ratio is not None:
                 target_aspect_ratio = snap_to_aspect_ratio(first_image_ratio)
             else:
@@ -858,7 +876,7 @@ class Shaobkj_APINode_Batch:
                 "使用系统代理": ("BOOLEAN", {"default": True}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (
-                    ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
+                    ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例", "智能比例"],
                     {"default": "原图1比例"},
                 ),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
