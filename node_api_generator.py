@@ -23,6 +23,7 @@ from .shaobkj_shared import (
     create_requests_session,
     disable_insecure_request_warnings,
     extract_image_from_json,
+    auth_headers_for_same_origin,
     get_config_value,
     pil_to_tensor,
     tensor_to_pil,
@@ -61,6 +62,7 @@ class Shaobkj_APINode:
                 "模型选择": (
                     [
                         "gemini-3-pro-image-preview",
+                        "智能加载",
                     ],
                     {"default": "gemini-3-pro-image-preview"},
                 ),
@@ -70,6 +72,7 @@ class Shaobkj_APINode:
                     ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例", "智能比例"],
                     {"default": "原图1比例"},
                 ),
+                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
@@ -171,7 +174,7 @@ class Shaobkj_APINode:
         
         return img_str, aspect_ratio
 
-    def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 等待时间, seed, **kwargs):
+    def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 接收模式, 等待时间, seed, **kwargs):
         api_key = API密钥
         base_origin = str(API地址).rstrip("/")
         gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
@@ -179,6 +182,7 @@ class Shaobkj_APINode:
         resolution = 分辨率
         prompt = 提示词
         aspect_ratio = 图片比例
+        accept_mode = 接收模式
         long_side_limit = int(kwargs.get("输入图像-长边设置", 1280))
         timeout_val = None if int(等待时间) == 0 else int(等待时间)
         seed_value = seed
@@ -189,6 +193,14 @@ class Shaobkj_APINode:
             raise ValueError("API Key is required.")
 
         model = 模型选择
+        if model == "智能加载":
+            resolution_key = str(resolution).lower()
+            if resolution_key == "2k":
+                model = "gemini-3-pro-image-preview-2k"
+            elif resolution_key == "4k":
+                model = "gemini-3-pro-image-preview-4k"
+            else:
+                model = "gemini-3-pro-image-preview"
 
         # Fix: Remove Authorization header for Gemini to improve proxy compatibility (align with ModeHub)
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
@@ -285,10 +297,146 @@ class Shaobkj_APINode:
                     pass
             return "\n".join(lines)
 
+        def adjust_image_aspect(pil_image):
+            if pil_image is None:
+                return None
+            if aspect_ratio != "原图1比例" or first_image_ratio is None:
+                return pil_image
+            target_w, target_h = self.get_target_size(resolution, aspect_ratio, first_image_ratio)
+            if target_w <= 0 or target_h <= 0:
+                return pil_image
+            w, h = pil_image.size
+            if w <= 0 or h <= 0:
+                return pil_image
+            target_ratio = float(target_w) / float(target_h)
+            src_ratio = float(w) / float(h)
+            if abs(src_ratio - target_ratio) > 0.001:
+                if src_ratio > target_ratio:
+                    new_w = max(1, int(round(h * target_ratio)))
+                    left = max(0, int((w - new_w) // 2))
+                    pil_image = pil_image.crop((left, 0, left + new_w, h))
+                else:
+                    new_h = max(1, int(round(w / target_ratio)))
+                    top = max(0, int((h - new_h) // 2))
+                    pil_image = pil_image.crop((0, top, w, top + new_h))
+            if pil_image.size != (int(target_w), int(target_h)):
+                pil_image = pil_image.resize((int(target_w), int(target_h)), Image.LANCZOS)
+            return pil_image
+
         disable_insecure_request_warnings()
         session, proxies = create_requests_session(bool(使用系统代理))
         wait_seconds = int(等待时间)
         submit_timeout = build_submit_timeout(wait_seconds)
+
+        def decode_b64_image(b64_str):
+            try:
+                image_data = base64.b64decode(b64_str)
+                image = Image.open(io.BytesIO(image_data))
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            except Exception:
+                return None
+
+        def download_url_image(image_url):
+            try:
+                img_headers = auth_headers_for_same_origin(str(image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
+                img_res = session.get(image_url, verify=False, timeout=60 if timeout_val is None else timeout_val, proxies=proxies, headers=img_headers)
+                img_res.raise_for_status()
+                image = Image.open(io.BytesIO(img_res.content))
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            except Exception:
+                return None
+
+        def extract_image_by_mode(res_json):
+            if accept_mode == "智能模式":
+                return extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+            if not isinstance(res_json, dict):
+                return None
+            if accept_mode == "URL":
+                data_list = res_json.get("data")
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict) and isinstance(item.get("url"), str):
+                            img = download_url_image(item.get("url"))
+                            if img:
+                                return img
+                choices = res_json.get("choices")
+                if isinstance(choices, list) and choices:
+                    content_text = choices[0].get("message", {}).get("content", "")
+                    if isinstance(content_text, str) and content_text:
+                        urls = re.findall(r"!\[.*?\]\((.*?)\)", content_text)
+                        if not urls:
+                            urls = re.findall(r"(https?://[^\s)]+)", content_text)
+                        for u in urls:
+                            if isinstance(u, str) and not u.lower().startswith("data:"):
+                                img = download_url_image(u)
+                                if img:
+                                    return img
+                candidates = res_json.get("candidates")
+                if isinstance(candidates, list) and candidates:
+                    for cand in candidates:
+                        content = cand.get("content") if isinstance(cand, dict) else None
+                        parts = content.get("parts") if isinstance(content, dict) else None
+                        if not isinstance(parts, list):
+                            continue
+                        for part in parts:
+                            if not isinstance(part, dict):
+                                continue
+                            text_content = part.get("text")
+                            if isinstance(text_content, str) and text_content:
+                                urls = re.findall(r"!\[.*?\]\((.*?)\)", text_content)
+                                if not urls:
+                                    urls = re.findall(r"(https?://[^\s)]+)", text_content)
+                                for u in urls:
+                                    if isinstance(u, str) and not u.lower().startswith("data:"):
+                                        img = download_url_image(u)
+                                        if img:
+                                            return img
+                return None
+            if accept_mode == "B64":
+                candidates = res_json.get("candidates")
+                if isinstance(candidates, list) and candidates:
+                    for cand in candidates:
+                        content = cand.get("content") if isinstance(cand, dict) else None
+                        parts = content.get("parts") if isinstance(content, dict) else None
+                        if not isinstance(parts, list):
+                            continue
+                        for part in parts:
+                            if not isinstance(part, dict):
+                                continue
+                            inline = part.get("inlineData") or part.get("inline_data")
+                            if isinstance(inline, dict) and inline.get("data"):
+                                img = decode_b64_image(inline.get("data"))
+                                if img:
+                                    return img
+                            text_content = part.get("text")
+                            if isinstance(text_content, str) and text_content:
+                                m = re.search(r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)", text_content)
+                                if m:
+                                    img = decode_b64_image(m.group(1))
+                                    if img:
+                                        return img
+                data_list = res_json.get("data")
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict) and item.get("b64_json"):
+                            img = decode_b64_image(item.get("b64_json"))
+                            if img:
+                                return img
+                choices = res_json.get("choices")
+                if isinstance(choices, list) and choices:
+                    content_text = choices[0].get("message", {}).get("content", "")
+                    if isinstance(content_text, str) and content_text:
+                        m = re.search(r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)", content_text)
+                        if m:
+                            img = decode_b64_image(m.group(1))
+                            if img:
+                                return img
+                return None
+            return None
 
 
         # ---------------------------------------------------------
@@ -353,7 +501,7 @@ class Shaobkj_APINode:
                 openai_json = openai_resp.json()
             except json.JSONDecodeError:
                 return None
-            return extract_image_from_json(openai_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+            return extract_image_by_mode(openai_json)
         
         def get_task_id_from_headers(resp):
             headers_map = getattr(resp, "headers", {}) or {}
@@ -408,22 +556,25 @@ class Shaobkj_APINode:
                      else:
                          fallback_img = try_openai_fallback()
                          if fallback_img:
-                             return return_result(pil_to_tensor(fallback_img), format_basic_api_response("成功", pil_image=fallback_img), pil_image=fallback_img)
+                            final_img = adjust_image_aspect(fallback_img)
+                            return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
                          raise RuntimeError(f"API Error: Empty response body (HTTP {response.status_code})")
                 else:
                      print(f"[ComfyUI-shaobkj] JSON Decode Error: {e}")
                      print(f"[ComfyUI-shaobkj] Response Content (first 500 chars): {raw_text[:500]}")
                      fallback_img = try_openai_fallback()
                      if fallback_img:
-                         return return_result(pil_to_tensor(fallback_img), format_basic_api_response("成功", pil_image=fallback_img), pil_image=fallback_img)
+                        final_img = adjust_image_aspect(fallback_img)
+                        return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
                      raise RuntimeError(f"Invalid JSON response from API: {e}")
 
             pbar.update_absolute(70)
 
             if isinstance(res_json, dict):
-                extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+                extracted_img = extract_image_by_mode(res_json)
                 if extracted_img:
-                    return return_result(pil_to_tensor(extracted_img), format_basic_api_response("成功", pil_image=extracted_img), pil_image=extracted_img)
+                    final_img = adjust_image_aspect(extracted_img)
+                    return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
 
             if isinstance(res_json, dict):
                 task_id = res_json.get("id") or res_json.get("task_id")
@@ -509,9 +660,10 @@ class Shaobkj_APINode:
                         # print(f"[ComfyUI-shaobkj] Warning: Polling response invalid JSON (Attempt {poll_attempts})")
                         continue
 
-                    extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60 if timeout_val is None else timeout_val)
+                    extracted_img = extract_image_by_mode(poll_json)
                     if extracted_img:
-                        return return_result(pil_to_tensor(extracted_img), format_basic_api_response("成功", pil_image=extracted_img), pil_image=extracted_img)
+                        final_img = adjust_image_aspect(extracted_img)
+                        return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
 
                     status = None
                     if isinstance(poll_json, dict):
@@ -526,7 +678,8 @@ class Shaobkj_APINode:
 
             fallback_img = try_openai_fallback()
             if fallback_img:
-                return return_result(pil_to_tensor(fallback_img), format_basic_api_response("成功", pil_image=fallback_img), pil_image=fallback_img)
+                    final_img = adjust_image_aspect(fallback_img)
+                    return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
             raise RuntimeError(f"No image found in API response. Response: {sanitize_text(json.dumps(res_json, ensure_ascii=False))}")
         except Exception as e:
             # Stop progress thread on error
@@ -612,9 +765,19 @@ def run_batch_generation_task(data):
         seed_val = int(data.get("seed", 0))
         save_path_input = data.get("save_path", "")
         save_format_input = data.get("save_format", "JPEG (默认95%)")
+        accept_mode = data.get("accept_mode", "智能模式")
 
         if not api_key:
              raise ValueError("API Key is required")
+
+        if model == "智能加载":
+            resolution_key = str(resolution).lower()
+            if resolution_key == "2k":
+                model = "gemini-3-pro-image-preview-2k"
+            elif resolution_key == "4k":
+                model = "gemini-3-pro-image-preview-4k"
+            else:
+                model = "gemini-3-pro-image-preview"
 
         # Prepare Request
         base_origin = str(api_url_base).rstrip("/")
@@ -686,12 +849,173 @@ def run_batch_generation_task(data):
         if target_aspect_ratio and target_aspect_ratio != "Free" and target_aspect_ratio != "原图1比例":
             payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(target_aspect_ratio)
 
+        def get_target_size_local(res, ar, first_ratio):
+            target_map = {"1k": 1024, "2k": 2048, "4k": 4096}
+            target = target_map.get(str(res).lower(), 1024)
+            ratio_str = str(ar)
+            if ratio_str == "原图1比例" and first_ratio is not None:
+                ratio_str = snap_to_aspect_ratio(first_ratio)
+            if ratio_str == "原图1比例" or ratio_str == "Free":
+                return target, target
+            if ":" in ratio_str:
+                try:
+                    a, b = ratio_str.split(":", 1)
+                    aw = float(a)
+                    ah = float(b)
+                    if aw > 0 and ah > 0:
+                        r = aw / ah
+                        if r >= 1.0:
+                            w = target
+                            h = max(1, int(round(target / r)))
+                        else:
+                            h = target
+                            w = max(1, int(round(target * r)))
+                        return int(w), int(h)
+                except Exception:
+                    pass
+            return target, target
+
+        def adjust_image_aspect(pil_image):
+            if pil_image is None:
+                return None
+            if aspect_ratio != "原图1比例" or first_image_ratio is None:
+                return pil_image
+            target_w, target_h = get_target_size_local(resolution, aspect_ratio, first_image_ratio)
+            if target_w <= 0 or target_h <= 0:
+                return pil_image
+            w, h = pil_image.size
+            if w <= 0 or h <= 0:
+                return pil_image
+            target_ratio = float(target_w) / float(target_h)
+            src_ratio = float(w) / float(h)
+            if abs(src_ratio - target_ratio) > 0.001:
+                if src_ratio > target_ratio:
+                    new_w = max(1, int(round(h * target_ratio)))
+                    left = max(0, int((w - new_w) // 2))
+                    pil_image = pil_image.crop((left, 0, left + new_w, h))
+                else:
+                    new_h = max(1, int(round(w / target_ratio)))
+                    top = max(0, int((h - new_h) // 2))
+                    pil_image = pil_image.crop((0, top, w, top + new_h))
+            if pil_image.size != (int(target_w), int(target_h)):
+                pil_image = pil_image.resize((int(target_w), int(target_h)), Image.LANCZOS)
+            return pil_image
+
         # Send Request
         disable_insecure_request_warnings()
         session, proxies = create_requests_session(bool(use_proxy))
         submit_timeout = build_submit_timeout(wait_time)
         
         # Helper Functions
+        def decode_b64_image(b64_str):
+            try:
+                image_data = base64.b64decode(b64_str)
+                image = Image.open(io.BytesIO(image_data))
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            except Exception:
+                return None
+
+        def download_url_image(image_url):
+            try:
+                img_headers = auth_headers_for_same_origin(str(image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
+                img_res = session.get(image_url, verify=False, timeout=60, proxies=proxies, headers=img_headers)
+                img_res.raise_for_status()
+                image = Image.open(io.BytesIO(img_res.content))
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            except Exception:
+                return None
+
+        def extract_image_by_mode(res_json):
+            if accept_mode == "智能模式":
+                return extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
+            if not isinstance(res_json, dict):
+                return None
+            if accept_mode == "URL":
+                data_list = res_json.get("data")
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict) and isinstance(item.get("url"), str):
+                            img = download_url_image(item.get("url"))
+                            if img:
+                                return img
+                choices = res_json.get("choices")
+                if isinstance(choices, list) and choices:
+                    content_text = choices[0].get("message", {}).get("content", "")
+                    if isinstance(content_text, str) and content_text:
+                        urls = re.findall(r"!\[.*?\]\((.*?)\)", content_text)
+                        if not urls:
+                            urls = re.findall(r"(https?://[^\s)]+)", content_text)
+                        for u in urls:
+                            if isinstance(u, str) and not u.lower().startswith("data:"):
+                                img = download_url_image(u)
+                                if img:
+                                    return img
+                candidates = res_json.get("candidates")
+                if isinstance(candidates, list) and candidates:
+                    for cand in candidates:
+                        content = cand.get("content") if isinstance(cand, dict) else None
+                        parts = content.get("parts") if isinstance(content, dict) else None
+                        if not isinstance(parts, list):
+                            continue
+                        for part in parts:
+                            if not isinstance(part, dict):
+                                continue
+                            text_content = part.get("text")
+                            if isinstance(text_content, str) and text_content:
+                                urls = re.findall(r"!\[.*?\]\((.*?)\)", text_content)
+                                if not urls:
+                                    urls = re.findall(r"(https?://[^\s)]+)", text_content)
+                                for u in urls:
+                                    if isinstance(u, str) and not u.lower().startswith("data:"):
+                                        img = download_url_image(u)
+                                        if img:
+                                            return img
+                return None
+            if accept_mode == "B64":
+                candidates = res_json.get("candidates")
+                if isinstance(candidates, list) and candidates:
+                    for cand in candidates:
+                        content = cand.get("content") if isinstance(cand, dict) else None
+                        parts = content.get("parts") if isinstance(content, dict) else None
+                        if not isinstance(parts, list):
+                            continue
+                        for part in parts:
+                            if not isinstance(part, dict):
+                                continue
+                            inline = part.get("inlineData") or part.get("inline_data")
+                            if isinstance(inline, dict) and inline.get("data"):
+                                img = decode_b64_image(inline.get("data"))
+                                if img:
+                                    return img
+                            text_content = part.get("text")
+                            if isinstance(text_content, str) and text_content:
+                                m = re.search(r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)", text_content)
+                                if m:
+                                    img = decode_b64_image(m.group(1))
+                                    if img:
+                                        return img
+                data_list = res_json.get("data")
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict) and item.get("b64_json"):
+                            img = decode_b64_image(item.get("b64_json"))
+                            if img:
+                                return img
+                choices = res_json.get("choices")
+                if isinstance(choices, list) and choices:
+                    content_text = choices[0].get("message", {}).get("content", "")
+                    if isinstance(content_text, str) and content_text:
+                        m = re.search(r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)", content_text)
+                        if m:
+                            img = decode_b64_image(m.group(1))
+                            if img:
+                                return img
+                return None
+            return None
         def get_task_id_from_headers(resp):
             headers_map = getattr(resp, "headers", {}) or {}
             tid = headers_map.get("X-Task-Id") or headers_map.get("Task-Id") or headers_map.get("task_id") or headers_map.get("task-id")
@@ -743,7 +1067,7 @@ def run_batch_generation_task(data):
             print(f"[ComfyUI-shaobkj] {task_id_local}: Warning - Empty or invalid response from API.")
 
         # Extract Result
-        extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
+        extracted_img = extract_image_by_mode(res_json)
         
         remote_task_id = None
         
@@ -770,17 +1094,17 @@ def run_batch_generation_task(data):
                      
                      time.sleep(2)
                      try:
-                         poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=30)
-                         fail_count = 0
-                         if poll_resp.status_code == 200:
-                             poll_json = poll_resp.json()
-                             extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60)
-                             if extracted_img:
-                                 break
-                             
-                             status = poll_json.get("status") or poll_json.get("task_status")
-                             if status in ["FAILED", "ERROR"]:
-                                 raise RuntimeError(f"Remote Task failed: {status}")
+                        poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=30)
+                        fail_count = 0
+                        if poll_resp.status_code == 200:
+                            poll_json = poll_resp.json()
+                            extracted_img = extract_image_by_mode(poll_json)
+                            if extracted_img:
+                                break
+                            
+                            status = poll_json.get("status") or poll_json.get("task_status")
+                            if status in ["FAILED", "ERROR"]:
+                                raise RuntimeError(f"Remote Task failed: {status}")
                      except Exception as e:
                          fail_count += 1
                          print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Polling error: {e}")
@@ -789,6 +1113,7 @@ def run_batch_generation_task(data):
 
         # Save Result
         if extracted_img:
+            final_img = adjust_image_aspect(extracted_img)
             # Determine Format
             save_params = {"format": "JPEG", "quality": 95}
             ext = ".jpg"
@@ -831,7 +1156,7 @@ def run_batch_generation_task(data):
                 filename = new_filename
                 counter += 1
             
-            extracted_img.save(out_path, **save_params)
+            final_img.save(out_path, **save_params)
             
             print(f"[ComfyUI-shaobkj] [Concurrent-Batch] {task_id_local}: Success! Saved to {out_path}")
             
@@ -872,13 +1197,20 @@ class Shaobkj_APINode_Batch:
                 "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True}),
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
-                "模型选择": (["gemini-3-pro-image-preview"], {"default": "gemini-3-pro-image-preview"}),
+                "模型选择": (
+                    [
+                        "gemini-3-pro-image-preview",
+                        "智能加载",
+                    ],
+                    {"default": "gemini-3-pro-image-preview"},
+                ),
                 "使用系统代理": ("BOOLEAN", {"default": True}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (
                     ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例", "智能比例"],
                     {"default": "原图1比例"},
                 ),
+                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "出图数量": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1, "tooltip": "单次提交的任务总数/循环次数"}),
                 "指定文件名": ("STRING", {"default": "", "multiline": False, "placeholder": "为空则自动命名，输入则自动添加序号"}),
@@ -899,7 +1231,7 @@ class Shaobkj_APINode_Batch:
     CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
-    def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 输入图像_长边设置=1280, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="JPEG (默认95%)", 最大并发数=5, 并发间隔=1.0, **kwargs):
+    def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 输入图像_长边设置=1280, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="JPEG (默认95%)", 最大并发数=5, 并发间隔=1.0, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True
         def get_val(v, default=None):
             if isinstance(v, list) and len(v) > 0:
@@ -944,6 +1276,7 @@ class Shaobkj_APINode_Batch:
         resolution_list = normalize_list_input(分辨率)
         aspect_ratio_list = normalize_list_input(图片比例)
         seed_list = normalize_list_input(seed)
+        accept_mode_list = normalize_list_input(接收模式)
         save_path_list = normalize_list_input(保存路径)
         save_format_list = normalize_list_input(保存格式)
         filename_prefix_list = normalize_list_input(指定文件名)
@@ -1068,6 +1401,7 @@ class Shaobkj_APINode_Batch:
                 "resolution": resolution_list[i % len(resolution_list)],
                 "prompt": p,
                 "aspect_ratio": aspect_ratio_list[i % len(aspect_ratio_list)],
+                "accept_mode": accept_mode_list[i % len(accept_mode_list)] if accept_mode_list else "智能模式",
                 "wait_time": 0,
                 "seed": s_val,
                 "save_path": save_path_list[i % len(save_path_list)],

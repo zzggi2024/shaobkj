@@ -583,6 +583,19 @@ def extract_image_from_json(res_json, session, proxies, api_key, api_origin, tim
                                 if image.mode != "RGB":
                                     image = image.convert("RGB")
                                 return image
+                        urls = re.findall(r"!\[.*?\]\((.*?)\)", text_content)
+                        if not urls:
+                            urls = re.findall(r"(https?://[^\s)]+)", text_content)
+                        for u in urls:
+                            if str(u).lower().startswith("data:"):
+                                continue
+                            img_headers = auth_headers_for_same_origin(str(u), api_origin, {"Authorization": f"Bearer {api_key}"})
+                            img_res = session.get(u, verify=False, timeout=timeout_val, proxies=proxies, headers=img_headers)
+                            img_res.raise_for_status()
+                            image = Image.open(io.BytesIO(img_res.content))
+                            if image.mode != "RGB":
+                                image = image.convert("RGB")
+                            return image
                     except Exception:
                         pass
 

@@ -16,6 +16,9 @@ from server import PromptServer
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from comfy.utils import ProgressBar
+import nodes
+import node_helpers
+import comfy
 
 from .shaobkj_shared import (
     get_config_value,
@@ -93,6 +96,7 @@ def run_concurrent_task_internal(data):
         seed_val = int(data.get("seed", 0))
         save_path_input = data.get("save_path", "")
         save_format_input = data.get("save_format", "JPEG (默认95%)")
+        accept_mode = data.get("accept_mode", "智能模式")
 
         if not api_key:
              raise ValueError("API Key is required")
@@ -131,6 +135,75 @@ def run_concurrent_task_internal(data):
 
         if not pil_images:
              raise ValueError("No valid images found (Check uploads or connections).")
+
+        first_image_ratio = None
+        first_image_size = None
+        if pil_images:
+            w0, h0 = pil_images[0].size
+            if w0 > 0 and h0 > 0:
+                first_image_ratio = float(w0) / float(h0)
+                first_image_size = (int(w0), int(h0))
+
+        def get_target_size_local(res, ar, first_size):
+            target_map = {"1k": 1024, "2k": 2048, "4k": 4096}
+            target = target_map.get(str(res).lower(), 1024)
+            ratio_str = str(ar)
+            if ratio_str == "原图1比例" and first_size is not None:
+                ratio_str = get_closest_aspect_ratio(first_size[0], first_size[1])
+            if ratio_str == "原图1比例" or ratio_str == "Free":
+                return target, target
+            if ":" in ratio_str:
+                try:
+                    a, b = ratio_str.split(":", 1)
+                    aw = float(a)
+                    ah = float(b)
+                    if aw > 0 and ah > 0:
+                        r = aw / ah
+                        if r >= 1.0:
+                            w = target
+                            h = max(1, int(round(target / r)))
+                        else:
+                            h = target
+                            w = max(1, int(round(target * r)))
+                        return int(w), int(h)
+                except Exception:
+                    pass
+            return target, target
+
+        def adjust_image_aspect(pil_image):
+            if pil_image is None:
+                return None
+            if aspect_ratio != "原图1比例" or first_image_ratio is None:
+                return pil_image
+            target_w, target_h = get_target_size_local(resolution, aspect_ratio, first_image_size)
+            if target_w <= 0 or target_h <= 0:
+                return pil_image
+            w, h = pil_image.size
+            if w <= 0 or h <= 0:
+                return pil_image
+            target_ratio = float(target_w) / float(target_h)
+            src_ratio = float(w) / float(h)
+            if abs(src_ratio - target_ratio) > 0.001:
+                if src_ratio > target_ratio:
+                    new_w = max(1, int(round(h * target_ratio)))
+                    left = max(0, int((w - new_w) // 2))
+                    pil_image = pil_image.crop((left, 0, left + new_w, h))
+                else:
+                    new_h = max(1, int(round(w / target_ratio)))
+                    top = max(0, int((h - new_h) // 2))
+                    pil_image = pil_image.crop((0, top, w, top + new_h))
+            if pil_image.size != (int(target_w), int(target_h)):
+                pil_image = pil_image.resize((int(target_w), int(target_h)), Image.LANCZOS)
+            return pil_image
+
+        if model == "智能加载":
+            resolution_key = str(resolution).lower()
+            if resolution_key == "2k":
+                model = "gemini-3-pro-image-preview-2k"
+            elif resolution_key == "4k":
+                model = "gemini-3-pro-image-preview-4k"
+            else:
+                model = "gemini-3-pro-image-preview"
 
         # Prepare Request
         base_origin = str(api_url_base).rstrip("/")
@@ -199,6 +272,116 @@ def run_concurrent_task_internal(data):
         session, proxies = create_requests_session(bool(use_proxy))
         submit_timeout = build_submit_timeout(wait_time)
         
+        def decode_b64_image(b64_str):
+            try:
+                image_data = base64.b64decode(b64_str)
+                image = Image.open(io.BytesIO(image_data))
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            except Exception:
+                return None
+
+        def download_url_image(image_url):
+            try:
+                img_headers = auth_headers_for_same_origin(str(image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
+                img_res = session.get(image_url, verify=False, timeout=60, proxies=proxies, headers=img_headers)
+                img_res.raise_for_status()
+                image = Image.open(io.BytesIO(img_res.content))
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            except Exception:
+                return None
+
+        def extract_image_by_mode(res_json):
+            if accept_mode == "智能模式":
+                return extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
+            if not isinstance(res_json, dict):
+                return None
+            if accept_mode == "URL":
+                data_list = res_json.get("data")
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict) and isinstance(item.get("url"), str):
+                            img = download_url_image(item.get("url"))
+                            if img:
+                                return img
+                choices = res_json.get("choices")
+                if isinstance(choices, list) and choices:
+                    content_text = choices[0].get("message", {}).get("content", "")
+                    if isinstance(content_text, str) and content_text:
+                        urls = re.findall(r"!\[.*?\]\((.*?)\)", content_text)
+                        if not urls:
+                            urls = re.findall(r"(https?://[^\s)]+)", content_text)
+                        for u in urls:
+                            if isinstance(u, str) and not u.lower().startswith("data:"):
+                                img = download_url_image(u)
+                                if img:
+                                    return img
+                candidates = res_json.get("candidates")
+                if isinstance(candidates, list) and candidates:
+                    for cand in candidates:
+                        content = cand.get("content") if isinstance(cand, dict) else None
+                        parts = content.get("parts") if isinstance(content, dict) else None
+                        if not isinstance(parts, list):
+                            continue
+                        for part in parts:
+                            if not isinstance(part, dict):
+                                continue
+                            text_content = part.get("text")
+                            if isinstance(text_content, str) and text_content:
+                                urls = re.findall(r"!\[.*?\]\((.*?)\)", text_content)
+                                if not urls:
+                                    urls = re.findall(r"(https?://[^\s)]+)", text_content)
+                                for u in urls:
+                                    if isinstance(u, str) and not u.lower().startswith("data:"):
+                                        img = download_url_image(u)
+                                        if img:
+                                            return img
+                return None
+            if accept_mode == "B64":
+                candidates = res_json.get("candidates")
+                if isinstance(candidates, list) and candidates:
+                    for cand in candidates:
+                        content = cand.get("content") if isinstance(cand, dict) else None
+                        parts = content.get("parts") if isinstance(content, dict) else None
+                        if not isinstance(parts, list):
+                            continue
+                        for part in parts:
+                            if not isinstance(part, dict):
+                                continue
+                            inline = part.get("inlineData") or part.get("inline_data")
+                            if isinstance(inline, dict) and inline.get("data"):
+                                img = decode_b64_image(inline.get("data"))
+                                if img:
+                                    return img
+                            text_content = part.get("text")
+                            if isinstance(text_content, str) and text_content:
+                                m = re.search(r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)", text_content)
+                                if m:
+                                    img = decode_b64_image(m.group(1))
+                                    if img:
+                                        return img
+                data_list = res_json.get("data")
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict) and item.get("b64_json"):
+                            img = decode_b64_image(item.get("b64_json"))
+                            if img:
+                                return img
+                choices = res_json.get("choices")
+                if isinstance(choices, list) and choices:
+                    content_text = choices[0].get("message", {}).get("content", "")
+                    if isinstance(content_text, str) and content_text:
+                        m = re.search(r"data:image/[^;]+;base64,([a-zA-Z0-9+/=]+)", content_text)
+                        if m:
+                            img = decode_b64_image(m.group(1))
+                            if img:
+                                return img
+                return None
+            return None
+
         # A. Helper Functions for Fallback
         def try_openai_fallback():
             openai_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
@@ -225,7 +408,7 @@ def run_concurrent_task_internal(data):
                 )
                 openai_resp.raise_for_status()
                 openai_json = openai_resp.json()
-                return extract_image_from_json(openai_json, session, proxies, api_key, api_origin, timeout_val=60)
+                return extract_image_by_mode(openai_json)
             except Exception as e:
                 print(f"[ComfyUI-shaobkj] [Concurrent-Sender] OpenAI Fallback failed: {e}")
                 return None
@@ -294,7 +477,7 @@ def run_concurrent_task_internal(data):
                 print(f"[ComfyUI-shaobkj] {task_id_local}: Warning - Empty or invalid response from API.")
 
              # Extract Result using shared helper
-             extracted_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=60)
+             extracted_img = extract_image_by_mode(res_json)
         
         remote_task_id = None
         
@@ -323,17 +506,17 @@ def run_concurrent_task_internal(data):
                      
                      time.sleep(2)
                      try:
-                         poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=30)
-                         fail_count = 0
-                         if poll_resp.status_code == 200:
-                             poll_json = poll_resp.json()
-                             extracted_img = extract_image_from_json(poll_json, session, proxies, api_key, api_origin, timeout_val=60)
-                             if extracted_img:
-                                 break
-                             
-                             status = poll_json.get("status") or poll_json.get("task_status")
-                             if status in ["FAILED", "ERROR"]:
-                                 raise RuntimeError(f"Remote Task failed: {status}")
+                        poll_resp = session.get(poll_url, headers=headers, params={"_t": int(time.time()*1000)}, verify=False, proxies=proxies, timeout=30)
+                        fail_count = 0
+                        if poll_resp.status_code == 200:
+                            poll_json = poll_resp.json()
+                            extracted_img = extract_image_by_mode(poll_json)
+                            if extracted_img:
+                                break
+                            
+                            status = poll_json.get("status") or poll_json.get("task_status")
+                            if status in ["FAILED", "ERROR"]:
+                                raise RuntimeError(f"Remote Task failed: {status}")
                      except Exception as e:
                          fail_count += 1
                          print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Polling error: {e}")
@@ -342,6 +525,7 @@ def run_concurrent_task_internal(data):
 
         # Save Result
         if extracted_img:
+            final_img = adjust_image_aspect(extracted_img)
             # Determine Format
             save_params = {"format": "JPEG", "quality": 95}
             ext = ".jpg"
@@ -388,7 +572,7 @@ def run_concurrent_task_internal(data):
                 filename = new_filename # Update filename variable for logging/return
                 counter += 1
             
-            extracted_img.save(out_path, **save_params)
+            final_img.save(out_path, **save_params)
             
             print(f"[ComfyUI-shaobkj] [Concurrent-Sender] {task_id_local}: Success! Saved to {out_path}")
             
@@ -483,10 +667,17 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True}),
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
-                "模型选择": (["gemini-3-pro-image-preview"], {"default": "gemini-3-pro-image-preview"}),
+                "模型选择": (
+                    [
+                        "gemini-3-pro-image-preview",
+                        "智能加载",
+                    ],
+                    {"default": "gemini-3-pro-image-preview"},
+                ),
                 "使用系统代理": ("BOOLEAN", {"default": True}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例", "智能比例"], {"default": "原图1比例"}),
+                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "Batch拆分模式": ("BOOLEAN", {"default": True}),
@@ -516,7 +707,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
-    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 保存路径, seed, **kwargs):
+    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 保存路径, seed, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True wraps everything in lists
         # We assume common parameters are same for all items (take first), OR we should support batching them too.
         # For simplicity, let's take the first item for "global" settings, but support batching for Prompts and Images.
@@ -534,6 +725,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
         # prompt is special, might be list of strings
         prompts_val = 提示词 # Keep as list if it is list
         aspect_ratio_val = get_val(图片比例)
+        accept_mode_val = get_val(接收模式)
         save_path_val = get_val(保存路径)
         
         # kwargs handling (also wrapped in lists)
@@ -570,6 +762,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             "resolution": resolution_val,
             "prompt": prompts_val, # Might be list
             "aspect_ratio": aspect_ratio_val,
+            "accept_mode": accept_mode_val,
             "long_side": long_side_val,
             "wait_time": wait_time_val,
             "seed": seed_val,
@@ -866,7 +1059,7 @@ class Shaobkj_Load_Batch_Images:
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("images", "masks", "filenames")
     FUNCTION = "load_images"
-    CATEGORY = "🤖shaobkj-APIbox/Utils"
+    CATEGORY = "🤖shaobkj-APIbox/实用工具"
 
     def load_images(self, directory, image_load_cap=0, start_index=0, load_always=False, sort_method="numerical"):
         folder_path = directory
@@ -957,6 +1150,192 @@ class Shaobkj_Load_Batch_Images:
 
         return (images_out, masks_out, filenames_out)
 
+class Shaobkj_FourWayRepair_HD:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "图像": ("IMAGE",),
+                "模型": ("MODEL",),
+                "VAE": ("VAE",),
+                "正面条件": ("CONDITIONING",),
+                "负面条件": ("CONDITIONING",),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
+                "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1}),
+                "采样器": (comfy.samplers.KSampler.SAMPLERS, ),
+                "调度器": (comfy.samplers.KSampler.SCHEDULERS, ),
+                "修补带宽百分比": ("FLOAT", {"default": 0.15, "min": 0.01, "max": 0.5, "step": 0.01}),
+                "软边比例": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 1.0, "step": 0.05}),
+                "denoise": ("FLOAT", {"default": 0.75, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "启用分块": ("BOOLEAN", {"default": True}),
+                "分块尺寸": ("INT", {"default": 1024, "min": 256, "max": 4096, "step": 64}),
+                "分块重叠": ("INT", {"default": 64, "min": 0, "max": 512, "step": 8}),
+                "噪声遮罩": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
+                "遮罩": ("MASK",),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "LATENT")
+    RETURN_NAMES = ("图像", "latent")
+    FUNCTION = "repair"
+    CATEGORY = "🤖shaobkj-APIbox"
+
+    def repair(self, 图像, 模型, VAE, 正面条件, 负面条件, seed, steps, cfg, 采样器, 调度器, 修补带宽百分比, 软边比例, denoise, 启用分块, 分块尺寸, 分块重叠, 噪声遮罩=True, 遮罩=None):
+        def build_soft_band_mask(h, w, band_w, soft_ratio, axis, device):
+            band_w = max(1, int(band_w))
+            soft_ratio = float(soft_ratio)
+            feather = max(1, int(round(band_w * soft_ratio)))
+            if axis == "v":
+                start = max(0, w // 2 - band_w // 2)
+                end = min(w, start + band_w)
+                x = torch.arange(w, device=device)
+                dist = torch.where(x < start, start - x, torch.where(x >= end, x - (end - 1), torch.zeros_like(x)))
+                mask_x = torch.clamp(1.0 - dist.float() / float(feather), 0.0, 1.0)
+                return mask_x.view(1, w).repeat(h, 1)
+            start = max(0, h // 2 - band_w // 2)
+            end = min(h, start + band_w)
+            y = torch.arange(h, device=device)
+            dist = torch.where(y < start, start - y, torch.where(y >= end, y - (end - 1), torch.zeros_like(y)))
+            mask_y = torch.clamp(1.0 - dist.float() / float(feather), 0.0, 1.0)
+            return mask_y.view(h, 1).repeat(1, w)
+
+        def inpaint_once(pixels_hw, mask_hw):
+            pixels_bhwc = pixels_hw.unsqueeze(0)
+            h_local, w_local = int(pixels_bhwc.shape[1]), int(pixels_bhwc.shape[2])
+            mask_bchw = mask_hw.reshape((1, 1, h_local, w_local))
+            x = (pixels_bhwc.shape[1] // 8) * 8
+            y = (pixels_bhwc.shape[2] // 8) * 8
+            mask_interp = torch.nn.functional.interpolate(mask_bchw, size=(pixels_bhwc.shape[1], pixels_bhwc.shape[2]), mode="bilinear").clamp(0.0, 1.0)
+            orig_pixels = pixels_bhwc
+            pixels = orig_pixels.clone()
+            if pixels.shape[1] != x or pixels.shape[2] != y:
+                x_offset = (pixels.shape[1] % 8) // 2
+                y_offset = (pixels.shape[2] % 8) // 2
+                pixels = pixels[:, x_offset:x + x_offset, y_offset:y + y_offset, :]
+                mask_interp = mask_interp[:, :, x_offset:x + x_offset, y_offset:y + y_offset]
+            m = (1.0 - mask_interp).squeeze(1)
+            for i in range(3):
+                pixels[:, :, :, i] -= 0.5
+                pixels[:, :, :, i] *= m
+                pixels[:, :, :, i] += 0.5
+            concat_latent = VAE.encode(pixels)
+            orig_latent = VAE.encode(orig_pixels)
+            latent = {"samples": orig_latent}
+            if 噪声遮罩:
+                latent["noise_mask"] = mask_interp
+            pos = node_helpers.conditioning_set_values(正面条件, {"concat_latent_image": concat_latent, "concat_mask": mask_interp})
+            neg = node_helpers.conditioning_set_values(负面条件, {"concat_latent_image": concat_latent, "concat_mask": mask_interp})
+            sampled = nodes.common_ksampler(模型, int(seed), int(steps), float(cfg), 采样器, 调度器, pos, neg, latent, denoise=float(denoise))[0]
+            decoded = VAE.decode(sampled["samples"])
+            return decoded[0]
+
+        def get_mask_input(h, w, device):
+            if 遮罩 is None:
+                return None
+            m_in = 遮罩
+            if isinstance(m_in, torch.Tensor) and m_in.dim() == 4:
+                m_in = m_in[0, 0] if m_in.shape[1] == 1 else m_in[0]
+            if isinstance(m_in, torch.Tensor) and (m_in.shape[0] != h or m_in.shape[1] != w):
+                m_in = torch.nn.functional.interpolate(m_in.reshape((1, 1, m_in.shape[-2], m_in.shape[-1])), size=(h, w), mode="bilinear").squeeze(0).squeeze(0)
+            return m_in.to(device=device, dtype=torch.float32)
+
+        def build_tile_indices(length, tile, overlap):
+            tile = max(1, int(tile))
+            overlap = max(0, int(overlap))
+            if tile >= length:
+                return [0]
+            stride = max(1, tile - overlap)
+            indices = []
+            pos = 0
+            while True:
+                if pos + tile >= length:
+                    indices.append(max(0, length - tile))
+                    break
+                indices.append(pos)
+                pos += stride
+            return indices
+
+        def build_tile_weight(h, w, y0, x0, tile_h, tile_w, overlap):
+            overlap = max(0, int(overlap))
+            if overlap == 0:
+                return torch.ones((tile_h, tile_w), device=img.device, dtype=torch.float32)
+            wx = torch.ones((tile_w,), device=img.device, dtype=torch.float32)
+            wy = torch.ones((tile_h,), device=img.device, dtype=torch.float32)
+            if x0 > 0:
+                ramp = torch.linspace(0.0, 1.0, steps=min(overlap, tile_w), device=img.device)
+                wx[:ramp.shape[0]] = ramp
+            if x0 + tile_w < w:
+                ramp = torch.linspace(1.0, 0.0, steps=min(overlap, tile_w), device=img.device)
+                wx[-ramp.shape[0]:] = torch.minimum(wx[-ramp.shape[0]:], ramp)
+            if y0 > 0:
+                ramp = torch.linspace(0.0, 1.0, steps=min(overlap, tile_h), device=img.device)
+                wy[:ramp.shape[0]] = ramp
+            if y0 + tile_h < h:
+                ramp = torch.linspace(1.0, 0.0, steps=min(overlap, tile_h), device=img.device)
+                wy[-ramp.shape[0]:] = torch.minimum(wy[-ramp.shape[0]:], ramp)
+            return wy.view(tile_h, 1) * wx.view(1, tile_w)
+
+        def inpaint_tiled(pixels_hw, mask_full, tile_size, overlap):
+            h, w = int(pixels_hw.shape[0]), int(pixels_hw.shape[1])
+            ys = build_tile_indices(h, tile_size, overlap)
+            xs = build_tile_indices(w, tile_size, overlap)
+            acc = torch.zeros_like(pixels_hw)
+            acc_w = torch.zeros((h, w), device=pixels_hw.device, dtype=torch.float32)
+            for y0 in ys:
+                for x0 in xs:
+                    y1 = min(h, y0 + tile_size)
+                    x1 = min(w, x0 + tile_size)
+                    tile = pixels_hw[y0:y1, x0:x1, :]
+                    mask_tile = mask_full[y0:y1, x0:x1]
+                    tile_out = inpaint_once(tile, mask_tile)
+                    weight = build_tile_weight(h, w, y0, x0, tile.shape[0], tile.shape[1], overlap)
+                    acc[y0:y1, x0:x1, :] += tile_out * weight.unsqueeze(-1)
+                    acc_w[y0:y1, x0:x1] += weight
+            acc = acc / acc_w.clamp(min=1e-6).unsqueeze(-1)
+            return acc
+
+        images = 图像
+        if isinstance(images, torch.Tensor) and images.dim() == 3:
+            images = images.unsqueeze(0)
+        batch = []
+        latents = []
+        for img in images:
+            if isinstance(img, torch.Tensor) and img.dim() == 4:
+                img = img[0]
+            img = torch.clamp(img, 0.0, 1.0)
+            h, w = int(img.shape[0]), int(img.shape[1])
+            bw = max(1, int(round(min(h, w) * float(修补带宽百分比))))
+            shifted = torch.roll(img, shifts=(h // 2, w // 2), dims=(0, 1))
+            img_stage = shifted
+            mask_in = get_mask_input(h, w, img.device)
+            mask_v = build_soft_band_mask(h, w, bw, 软边比例, "v", img.device)
+            if mask_in is not None:
+                mask_v = torch.maximum(mask_v, mask_in)
+            mask_h = build_soft_band_mask(h, w, bw, 软边比例, "h", img.device)
+            if mask_in is not None:
+                mask_h = torch.maximum(mask_h, mask_in)
+            if 启用分块 and max(h, w) > int(分块尺寸):
+                tile = int(分块尺寸)
+                overlap = int(分块重叠)
+                img_stage = inpaint_tiled(img_stage, mask_v, tile, overlap)
+                img_stage = inpaint_tiled(img_stage, mask_h, tile, overlap)
+            else:
+                img_stage = inpaint_once(img_stage, mask_v)
+                img_stage = inpaint_once(img_stage, mask_h)
+            out = torch.roll(img_stage, shifts=(-h // 2, -w // 2), dims=(0, 1))
+            out = torch.clamp(out, 0.0, 1.0)
+            batch.append(out)
+            latent_samples = VAE.encode(out.unsqueeze(0))
+            latents.append(latent_samples)
+        latent_out = {"samples": torch.cat(latents, dim=0)} if latents else {"samples": torch.empty((0,))}
+        return (torch.stack(batch, dim=0), latent_out)
+
 # ----------------------------------------------------------------------------
 # Node Registration
 # ----------------------------------------------------------------------------
@@ -964,11 +1343,13 @@ class Shaobkj_Load_Batch_Images:
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
     "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
-    "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images
+    "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
+    "Shaobkj_FourWayRepair_HD": Shaobkj_FourWayRepair_HD
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
     "Shaobkj_Load_Image_Path": "🤖加载图像",
-    "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)"
+    "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)",
+    "Shaobkj_FourWayRepair_HD": "🤖四方修复高清"
 }
