@@ -5,6 +5,7 @@ import threading
 import traceback
 import base64
 import io
+import shutil
 import random
 import re
 import torch
@@ -34,6 +35,7 @@ from .shaobkj_shared import (
     update_async_task,
     get_all_async_tasks,
     pil_to_tensor,
+    tensor_to_pil,
     estimate_subject_ratio,
     map_ratio_to_aspect_ratio,
 )
@@ -1150,6 +1152,109 @@ class Shaobkj_Load_Batch_Images:
 
         return (images_out, masks_out, filenames_out)
 
+class Shaobkj_Image_Save:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "图像": ("IMAGE",),
+                "保存路径": ("STRING", {"default": "Shaobkj_Save", "multiline": False}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
+                "文件名": ("STRING", {"default": "image", "multiline": False}),
+                "质量": ("INT", {"default": 95, "min": 1, "max": 100, "step": 1}),
+                "预览": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭"}),
+            }
+        }
+
+    RETURN_TYPES = ()
+    RETURN_NAMES = ()
+    FUNCTION = "save_image"
+    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    OUTPUT_NODE = True
+
+    def save_image(self, 图像, 保存路径, 保存格式, 文件名, 质量, 预览):
+        images = 图像
+        if isinstance(images, torch.Tensor) and images.dim() == 3:
+            images = images.unsqueeze(0)
+
+        output_root = folder_paths.get_output_directory()
+        out_dir = output_root
+        if isinstance(保存路径, str) and 保存路径.strip():
+            custom_dir = 保存路径.strip()
+            if not os.path.isabs(custom_dir):
+                custom_dir = os.path.join(output_root, custom_dir)
+            os.makedirs(custom_dir, exist_ok=True)
+            out_dir = custom_dir
+
+        save_params = {"format": "JPEG", "quality": int(质量)}
+        ext = ".jpg"
+        if 保存格式 and "PNG" in 保存格式:
+            save_params = {"format": "PNG"}
+            ext = ".png"
+        elif 保存格式 and "WEBP" in 保存格式:
+            save_params = {"format": "WEBP", "lossless": True}
+            ext = ".webp"
+
+        base_name = str(文件名).strip() if 文件名 is not None else ""
+        base_name = os.path.splitext(os.path.basename(base_name))[0]
+        if not base_name:
+            base_name = "image"
+
+        filenames = []
+        out_paths = []
+        for i in range(images.shape[0]):
+            img_tensor = images[i]
+            pil_img = tensor_to_pil(img_tensor)
+            filename = f"{base_name}{ext}"
+            out_path = os.path.join(out_dir, filename)
+            counter = 1
+            while os.path.exists(out_path):
+                filename = f"{base_name}_{counter}{ext}"
+                out_path = os.path.join(out_dir, filename)
+                counter += 1
+            pil_img.save(out_path, **save_params)
+            filenames.append(filename)
+            out_paths.append(out_path)
+
+        if 预览:
+            preview_entries = []
+            out_dir_in_output = False
+            try:
+                out_dir_in_output = os.path.commonpath([output_root, out_dir]) == os.path.abspath(output_root)
+            except Exception:
+                out_dir_in_output = False
+
+            if out_dir_in_output:
+                rel_path = os.path.relpath(out_dir, output_root)
+                if rel_path == ".":
+                    rel_path = ""
+                preview_entries = [
+                    {"filename": name, "subfolder": rel_path, "type": "output"}
+                    for name in filenames
+                ]
+            else:
+                preview_dir = os.path.join(output_root, "Shaobkj_Preview")
+                os.makedirs(preview_dir, exist_ok=True)
+                preview_subfolder = "Shaobkj_Preview"
+                for saved_path, saved_name in zip(out_paths, filenames):
+                    preview_name = saved_name
+                    preview_path = os.path.join(preview_dir, preview_name)
+                    counter = 1
+                    base_preview = os.path.splitext(preview_name)[0]
+                    ext_preview = os.path.splitext(preview_name)[1]
+                    while os.path.exists(preview_path):
+                        preview_name = f"{base_preview}_{counter}{ext_preview}"
+                        preview_path = os.path.join(preview_dir, preview_name)
+                        counter += 1
+                    shutil.copyfile(saved_path, preview_path)
+                    preview_entries.append({"filename": preview_name, "subfolder": preview_subfolder, "type": "output"})
+
+            return {"ui": {"images": preview_entries}}
+        return {}
+
 class Shaobkj_FourWayRepair_HD:
     def __init__(self):
         pass
@@ -1344,6 +1449,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
     "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
     "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
+    "Shaobkj_Image_Save": Shaobkj_Image_Save,
     "Shaobkj_FourWayRepair_HD": Shaobkj_FourWayRepair_HD
 }
 
@@ -1351,5 +1457,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
     "Shaobkj_Load_Image_Path": "🤖加载图像",
     "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)",
+    "Shaobkj_Image_Save": "🤖图像保存",
     "Shaobkj_FourWayRepair_HD": "🤖四方修复高清"
 }
