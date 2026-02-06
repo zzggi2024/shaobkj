@@ -114,39 +114,6 @@ class Shaobkj_APINode:
                 
         return closest_str
 
-    def get_target_size(self, resolution, aspect_ratio, first_image_ratio=None):
-        target_map = {"1k": 1024, "2k": 2048, "4k": 4096}
-        target = target_map.get(str(resolution).lower(), 1024)
-
-        ar = str(aspect_ratio)
-        
-        # Handle "原图1比例" (Use first image ratio if available)
-        if ar == "原图1比例" and first_image_ratio is not None:
-             # Snap the actual float ratio to nearest standard string
-             snapped_ar_str = self.snap_to_aspect_ratio(first_image_ratio)
-             ar = snapped_ar_str # e.g., "16:9"
-
-        if ar == "原图1比例" or ar == "Free": 
-             return target, target
-             
-        if ":" in ar:
-            try:
-                a, b = ar.split(":", 1)
-                aw = float(a)
-                ah = float(b)
-                if aw > 0 and ah > 0:
-                    r = aw / ah
-                    if r >= 1.0:
-                        w = target
-                        h = max(1, int(round(target / r)))
-                    else:
-                        h = target
-                        w = max(1, int(round(target * r)))
-                    return int(w), int(h)
-            except Exception:
-                pass
-        return target, target
-
     def resize_and_encode_image(self, image_tensor, long_side):
         if image_tensor is None:
             return None, 1.0
@@ -267,6 +234,7 @@ class Shaobkj_APINode:
         if api_aspect_ratio:
             payload["generationConfig"]["imageConfig"]["aspectRatio"] = api_aspect_ratio
 
+        print(f"[ComfyUI-shaobkj] Request imageConfig: size={payload['generationConfig']['imageConfig'].get('imageSize')} aspectRatio={payload['generationConfig']['imageConfig'].get('aspectRatio')} raw_ratio={first_image_ratio}")
         print(f"[ComfyUI-shaobkj] Sending request to {url} with model {model}...")
         pbar = ProgressBar(100)
         pbar.update_absolute(0)
@@ -296,32 +264,6 @@ class Shaobkj_APINode:
                 except Exception:
                     pass
             return "\n".join(lines)
-
-        def adjust_image_aspect(pil_image):
-            if pil_image is None:
-                return None
-            if aspect_ratio != "原图1比例" or first_image_ratio is None:
-                return pil_image
-            target_w, target_h = self.get_target_size(resolution, aspect_ratio, first_image_ratio)
-            if target_w <= 0 or target_h <= 0:
-                return pil_image
-            w, h = pil_image.size
-            if w <= 0 or h <= 0:
-                return pil_image
-            target_ratio = float(target_w) / float(target_h)
-            src_ratio = float(w) / float(h)
-            if abs(src_ratio - target_ratio) > 0.001:
-                if src_ratio > target_ratio:
-                    new_w = max(1, int(round(h * target_ratio)))
-                    left = max(0, int((w - new_w) // 2))
-                    pil_image = pil_image.crop((left, 0, left + new_w, h))
-                else:
-                    new_h = max(1, int(round(w / target_ratio)))
-                    top = max(0, int((h - new_h) // 2))
-                    pil_image = pil_image.crop((0, top, w, top + new_h))
-            if pil_image.size != (int(target_w), int(target_h)):
-                pil_image = pil_image.resize((int(target_w), int(target_h)), Image.LANCZOS)
-            return pil_image
 
         disable_insecure_request_warnings()
         session, proxies = create_requests_session(bool(使用系统代理))
@@ -556,7 +498,7 @@ class Shaobkj_APINode:
                      else:
                          fallback_img = try_openai_fallback()
                          if fallback_img:
-                            final_img = adjust_image_aspect(fallback_img)
+                            final_img = fallback_img
                             return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
                          raise RuntimeError(f"API Error: Empty response body (HTTP {response.status_code})")
                 else:
@@ -564,7 +506,7 @@ class Shaobkj_APINode:
                      print(f"[ComfyUI-shaobkj] Response Content (first 500 chars): {raw_text[:500]}")
                      fallback_img = try_openai_fallback()
                      if fallback_img:
-                        final_img = adjust_image_aspect(fallback_img)
+                        final_img = fallback_img
                         return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
                      raise RuntimeError(f"Invalid JSON response from API: {e}")
 
@@ -573,7 +515,9 @@ class Shaobkj_APINode:
             if isinstance(res_json, dict):
                 extracted_img = extract_image_by_mode(res_json)
                 if extracted_img:
-                    final_img = adjust_image_aspect(extracted_img)
+                    w, h = extracted_img.size
+                    print(f"[ComfyUI-shaobkj] Response image size: {int(w)}x{int(h)}")
+                    final_img = extracted_img
                     return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
 
             if isinstance(res_json, dict):
@@ -662,7 +606,9 @@ class Shaobkj_APINode:
 
                     extracted_img = extract_image_by_mode(poll_json)
                     if extracted_img:
-                        final_img = adjust_image_aspect(extracted_img)
+                        w, h = extracted_img.size
+                        print(f"[ComfyUI-shaobkj] Response image size (poll): {int(w)}x{int(h)}")
+                        final_img = extracted_img
                         return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
 
                     status = None
@@ -678,7 +624,7 @@ class Shaobkj_APINode:
 
             fallback_img = try_openai_fallback()
             if fallback_img:
-                    final_img = adjust_image_aspect(fallback_img)
+                    final_img = fallback_img
                     return return_result(pil_to_tensor(final_img), format_basic_api_response("成功", pil_image=final_img), pil_image=final_img)
             raise RuntimeError(f"No image found in API response. Response: {sanitize_text(json.dumps(res_json, ensure_ascii=False))}")
         except Exception as e:
@@ -849,58 +795,7 @@ def run_batch_generation_task(data):
         if target_aspect_ratio and target_aspect_ratio != "Free" and target_aspect_ratio != "原图1比例":
             payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(target_aspect_ratio)
 
-        def get_target_size_local(res, ar, first_ratio):
-            target_map = {"1k": 1024, "2k": 2048, "4k": 4096}
-            target = target_map.get(str(res).lower(), 1024)
-            ratio_str = str(ar)
-            if ratio_str == "原图1比例" and first_ratio is not None:
-                ratio_str = snap_to_aspect_ratio(first_ratio)
-            if ratio_str == "原图1比例" or ratio_str == "Free":
-                return target, target
-            if ":" in ratio_str:
-                try:
-                    a, b = ratio_str.split(":", 1)
-                    aw = float(a)
-                    ah = float(b)
-                    if aw > 0 and ah > 0:
-                        r = aw / ah
-                        if r >= 1.0:
-                            w = target
-                            h = max(1, int(round(target / r)))
-                        else:
-                            h = target
-                            w = max(1, int(round(target * r)))
-                        return int(w), int(h)
-                except Exception:
-                    pass
-            return target, target
-
-        def adjust_image_aspect(pil_image):
-            if pil_image is None:
-                return None
-            if aspect_ratio != "原图1比例" or first_image_ratio is None:
-                return pil_image
-            target_w, target_h = get_target_size_local(resolution, aspect_ratio, first_image_ratio)
-            if target_w <= 0 or target_h <= 0:
-                return pil_image
-            w, h = pil_image.size
-            if w <= 0 or h <= 0:
-                return pil_image
-            target_ratio = float(target_w) / float(target_h)
-            src_ratio = float(w) / float(h)
-            if abs(src_ratio - target_ratio) > 0.001:
-                if src_ratio > target_ratio:
-                    new_w = max(1, int(round(h * target_ratio)))
-                    left = max(0, int((w - new_w) // 2))
-                    pil_image = pil_image.crop((left, 0, left + new_w, h))
-                else:
-                    new_h = max(1, int(round(w / target_ratio)))
-                    top = max(0, int((h - new_h) // 2))
-                    pil_image = pil_image.crop((0, top, w, top + new_h))
-            if pil_image.size != (int(target_w), int(target_h)):
-                pil_image = pil_image.resize((int(target_w), int(target_h)), Image.LANCZOS)
-            return pil_image
-
+        print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Request imageConfig: size={payload['generationConfig']['imageConfig'].get('imageSize')} aspectRatio={payload['generationConfig']['imageConfig'].get('aspectRatio')} raw_ratio={first_image_ratio}")
         # Send Request
         disable_insecure_request_warnings()
         session, proxies = create_requests_session(bool(use_proxy))
@@ -1113,7 +1008,9 @@ def run_batch_generation_task(data):
 
         # Save Result
         if extracted_img:
-            final_img = adjust_image_aspect(extracted_img)
+            w, h = extracted_img.size
+            print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Response image size: {int(w)}x{int(h)}")
+            final_img = extracted_img
             # Determine Format
             save_params = {"format": "JPEG", "quality": 95}
             ext = ".jpg"
