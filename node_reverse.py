@@ -26,7 +26,7 @@ class Shaobkj_Reverse_Node:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "系统提示词": ("STRING", {"multiline": True, "default": ""}),
+                "系统提示词": ("STRING", {"multiline": True, "default": "你是高效的AI提示词生成大师。请根据用户输入生成可直接执行的方案或内容，结构清晰，直接输出提示词，不要有任何废话。"}),
                 "需求提示词": ("STRING", {"multiline": True, "default": "Describe this content in detail to recreate it as a prompt."}),
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),

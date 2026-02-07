@@ -26,7 +26,7 @@ class Shaobkj_LLM_App:
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
                 "模型名称": ("STRING", {"default": "gemini-3-pro-preview", "multiline": False}),
                 "使用系统代理": ("BOOLEAN", {"default": True}),
-                "系统指令": ("STRING", {"default": "你是一个有用的助手。", "multiline": True}),
+                "系统指令": ("STRING", {"default": "你是高效的AI提示词生成大师。请根据用户输入生成可直接执行的方案或内容，结构清晰，直接输出提示词，不要有任何废话。", "multiline": True}),
                 "用户输入": ("STRING", {"default": "", "multiline": True}),
                 "思考模式": ("BOOLEAN", {"default": False, "label_on": "开启", "label_off": "关闭"}),
                 "思考预算": ("INT", {"default": 10240, "min": 1024, "max": 65536, "step": 1024}),

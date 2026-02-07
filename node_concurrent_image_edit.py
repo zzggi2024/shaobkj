@@ -10,6 +10,7 @@ import random
 import re
 import torch
 import numpy as np
+from collections import deque
 from urllib.parse import urlparse
 import folder_paths
 from PIL import Image, ImageOps
@@ -29,6 +30,7 @@ from .shaobkj_shared import (
     post_json_with_retry,
     auth_headers_for_same_origin,
     resize_and_encode_image,
+    resize_pil_long_side,
     extract_image_from_json,
     save_local_record,
     sanitize_text,
@@ -38,6 +40,7 @@ from .shaobkj_shared import (
     tensor_to_pil,
     estimate_subject_ratio,
     map_ratio_to_aspect_ratio,
+    crop_image_to_ratio,
 )
 
 def get_closest_aspect_ratio(width, height):
@@ -98,6 +101,7 @@ def run_concurrent_task_internal(data):
         seed_val = int(data.get("seed", 0))
         save_path_input = data.get("save_path", "")
         save_format_input = data.get("save_format", "JPEG (默认95%)")
+        crop_align = data.get("crop_align", "居中")
         accept_mode = data.get("accept_mode", "智能模式")
 
         if not api_key:
@@ -198,6 +202,30 @@ def run_concurrent_task_internal(data):
                 pil_image = pil_image.resize((int(target_w), int(target_h)), Image.LANCZOS)
             return pil_image
 
+        def should_fill_input():
+            if aspect_ratio in ("原图1比例", "智能比例", "Free"):
+                return False
+            ratio_str = str(aspect_ratio)
+            return ":" in ratio_str
+
+        def encode_input_image(pil_image):
+            if pil_image is None:
+                return None, None
+            img = resize_pil_long_side(pil_image, long_side)
+            if should_fill_input():
+                img = crop_image_to_ratio(img, str(aspect_ratio), crop_align)
+            if "PNG" in str(save_format_input):
+                if img.mode != "RGBA":
+                    img = img.convert("RGBA")
+                buffered = io.BytesIO()
+                img.save(buffered, format="PNG")
+                return base64.b64encode(buffered.getvalue()).decode("utf-8"), "image/png"
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG", quality=95)
+            return base64.b64encode(buffered.getvalue()).decode("utf-8"), "image/jpeg"
+
         if model == "智能加载":
             resolution_key = str(resolution).lower()
             if resolution_key == "2k":
@@ -223,13 +251,12 @@ def run_concurrent_task_internal(data):
         
         for img in pil_images:
             try:
-                # Use shared helper
-                b64_str, img_ratio = resize_and_encode_image(img, long_side)
+                b64_str, mime_type = encode_input_image(img)
                 if b64_str:
                     image_b64_list.append(b64_str)
                     parts.append({
                         "inline_data": {
-                            "mime_type": "image/jpeg",
+                            "mime_type": mime_type,
                             "data": b64_str
                         }
                     })
@@ -680,6 +707,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
                 "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例", "智能比例"], {"default": "原图1比例"}),
                 "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
+                "裁切对齐方式": (["居中", "顶部", "底部"], {"default": "居中"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "Batch拆分模式": ("BOOLEAN", {"default": True}),
@@ -709,7 +737,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
-    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 保存路径, seed, **kwargs):
+    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 裁切对齐方式, 保存路径, seed, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True wraps everything in lists
         # We assume common parameters are same for all items (take first), OR we should support batching them too.
         # For simplicity, let's take the first item for "global" settings, but support batching for Prompts and Images.
@@ -728,6 +756,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
         prompts_val = 提示词 # Keep as list if it is list
         aspect_ratio_val = get_val(图片比例)
         accept_mode_val = get_val(接收模式)
+        crop_align_val = get_val(裁切对齐方式)
         save_path_val = get_val(保存路径)
         
         # kwargs handling (also wrapped in lists)
@@ -765,6 +794,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             "prompt": prompts_val, # Might be list
             "aspect_ratio": aspect_ratio_val,
             "accept_mode": accept_mode_val,
+            "crop_align": crop_align_val,
             "long_side": long_side_val,
             "wait_time": wait_time_val,
             "seed": seed_val,
@@ -1152,6 +1182,130 @@ class Shaobkj_Load_Batch_Images:
 
         return (images_out, masks_out, filenames_out)
 
+class Shaobkj_Transparent_Background:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "图像": ("IMAGE",),
+                "容差": ("FLOAT", {"default": 20.0, "min": 0.0, "max": 100.0, "step": 0.5}),
+                "连通": ("BOOLEAN", {"default": True}),
+                "羽化": ("INT", {"default": 2, "min": 0, "max": 50, "step": 1}),
+                "取样方式": (["边缘均值", "四角均值"], {"default": "边缘均值"}),
+                "文字优先": ("BOOLEAN", {"default": True}),
+                "文字对比阈值": ("FLOAT", {"default": 0.08, "min": 0.0, "max": 1.0, "step": 0.01}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK")
+    RETURN_NAMES = ("图像", "遮罩")
+    FUNCTION = "make_transparent"
+    CATEGORY = "🤖shaobkj-APIbox"
+
+    def _flood_fill_background(self, dist2, tol2):
+        h, w = dist2.shape
+        mask = np.zeros((h, w), dtype=bool)
+        visited = np.zeros((h, w), dtype=bool)
+        q = deque()
+        for x in range(w):
+            if dist2[0, x] <= tol2:
+                q.append((0, x))
+            if dist2[h - 1, x] <= tol2:
+                q.append((h - 1, x))
+        for y in range(h):
+            if dist2[y, 0] <= tol2:
+                q.append((y, 0))
+            if dist2[y, w - 1] <= tol2:
+                q.append((y, w - 1))
+        while q:
+            y, x = q.popleft()
+            if visited[y, x]:
+                continue
+            visited[y, x] = True
+            if dist2[y, x] > tol2:
+                continue
+            mask[y, x] = True
+            if y > 0:
+                q.append((y - 1, x))
+            if y < h - 1:
+                q.append((y + 1, x))
+            if x > 0:
+                q.append((y, x - 1))
+            if x < w - 1:
+                q.append((y, x + 1))
+        return mask
+
+    def make_transparent(self, 图像, 容差, 连通, 羽化, 取样方式, 文字优先, 文字对比阈值):
+        images = 图像
+        if isinstance(images, torch.Tensor) and images.dim() == 3:
+            images = images.unsqueeze(0)
+
+        tol = float(容差) / 100.0
+        feather = int(羽化)
+        use_contiguous = bool(连通)
+        sample_mode = str(取样方式)
+        text_first = bool(文字优先)
+        text_contrast = float(文字对比阈值)
+
+        out_images = []
+        out_masks = []
+        for i in range(images.shape[0]):
+            img = images[i]
+            if isinstance(img, torch.Tensor) and img.dim() == 4:
+                img = img[0]
+            img = torch.clamp(img, 0.0, 1.0)
+            if img.shape[-1] > 3:
+                img = img[:, :, :3]
+            img_np = img.detach().cpu().numpy()
+            h, w = img_np.shape[0], img_np.shape[1]
+
+            if sample_mode == "四角均值":
+                ref = np.stack(
+                    [img_np[0, 0], img_np[0, w - 1], img_np[h - 1, 0], img_np[h - 1, w - 1]],
+                    axis=0,
+                ).mean(axis=0)
+            else:
+                edges = np.concatenate(
+                    [img_np[0, :, :], img_np[h - 1, :, :], img_np[:, 0, :], img_np[:, w - 1, :]],
+                    axis=0,
+                )
+                ref = edges.mean(axis=0)
+
+            diff = img_np - ref
+            dist2 = np.sum(diff * diff, axis=2)
+            tol2 = tol * tol
+            if use_contiguous:
+                bg_mask = self._flood_fill_background(dist2, tol2)
+            else:
+                bg_mask = dist2 <= tol2
+            if text_first and text_contrast > 0.0:
+                gray = 0.299 * img_np[:, :, 0] + 0.587 * img_np[:, :, 1] + 0.114 * img_np[:, :, 2]
+                dx = np.abs(gray[:, 1:] - gray[:, :-1])
+                dy = np.abs(gray[1:, :] - gray[:-1, :])
+                dx = np.pad(dx, ((0, 0), (0, 1)), mode="edge")
+                dy = np.pad(dy, ((0, 1), (0, 0)), mode="edge")
+                grad = np.maximum(dx, dy)
+                bg_mask = np.logical_and(bg_mask, grad < text_contrast)
+
+            bg_mask_f = bg_mask.astype(np.float32)
+            if feather > 0:
+                mask_t = torch.from_numpy(bg_mask_f).unsqueeze(0).unsqueeze(0)
+                k = feather * 2 + 1
+                mask_t = torch.nn.functional.avg_pool2d(mask_t, kernel_size=k, stride=1, padding=feather)
+                bg_mask_f = mask_t.squeeze(0).squeeze(0).cpu().numpy()
+
+            fg_mask = 1.0 - np.clip(bg_mask_f, 0.0, 1.0)
+            rgb = img_np * fg_mask[:, :, None]
+            alpha = fg_mask[:, :, None]
+            rgba = np.concatenate([rgb, alpha], axis=2)
+            out_images.append(torch.from_numpy(rgba.astype(np.float32)))
+            out_masks.append(torch.from_numpy(fg_mask.astype(np.float32)))
+
+        return (torch.stack(out_images, dim=0), torch.stack(out_masks, dim=0))
+
 class Shaobkj_Image_Save:
     def __init__(self):
         pass
@@ -1191,10 +1345,12 @@ class Shaobkj_Image_Save:
 
         save_params = {"format": "JPEG", "quality": int(质量)}
         ext = ".jpg"
-        if 保存格式 and "PNG" in 保存格式:
+        is_png = bool(保存格式 and "PNG" in 保存格式)
+        is_webp = bool(保存格式 and "WEBP" in 保存格式)
+        if is_png:
             save_params = {"format": "PNG"}
             ext = ".png"
-        elif 保存格式 and "WEBP" in 保存格式:
+        elif is_webp:
             save_params = {"format": "WEBP", "lossless": True}
             ext = ".webp"
 
@@ -1207,7 +1363,23 @@ class Shaobkj_Image_Save:
         out_paths = []
         for i in range(images.shape[0]):
             img_tensor = images[i]
-            pil_img = tensor_to_pil(img_tensor)
+            t = img_tensor
+            if isinstance(t, torch.Tensor) and t.dim() == 4:
+                t = t[0]
+            if isinstance(t, torch.Tensor) and t.dim() == 3 and t.shape[0] in (1, 3, 4) and t.shape[-1] not in (1, 3, 4):
+                t = t.permute(1, 2, 0)
+            arr = t.detach().cpu().numpy() if isinstance(t, torch.Tensor) else np.array(t)
+            arr = np.clip(arr, 0.0, 1.0)
+            if arr.ndim == 2:
+                arr = arr[:, :, None]
+            if arr.shape[-1] == 1:
+                arr = np.repeat(arr, 3, axis=2)
+            if arr.shape[-1] >= 4 and is_png:
+                img_arr = (arr[:, :, :4] * 255.0).astype(np.uint8)
+                pil_img = Image.fromarray(img_arr, mode="RGBA")
+            else:
+                img_arr = (arr[:, :, :3] * 255.0).astype(np.uint8)
+                pil_img = Image.fromarray(img_arr, mode="RGB")
             filename = f"{base_name}{ext}"
             out_path = os.path.join(out_dir, filename)
             counter = 1
@@ -1449,6 +1621,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
     "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
     "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
+    "Shaobkj_Transparent_Background": Shaobkj_Transparent_Background,
     "Shaobkj_Image_Save": Shaobkj_Image_Save,
     "Shaobkj_FourWayRepair_HD": Shaobkj_FourWayRepair_HD
 }
@@ -1457,6 +1630,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
     "Shaobkj_Load_Image_Path": "🤖加载图像",
     "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)",
+    "Shaobkj_Transparent_Background": "🤖透明背景",
     "Shaobkj_Image_Save": "🤖图像保存",
     "Shaobkj_FourWayRepair_HD": "🤖四方修复高清"
 }

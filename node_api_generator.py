@@ -31,9 +31,10 @@ from .shaobkj_shared import (
     save_local_record,
     update_async_task,
     get_all_async_tasks,
-    resize_and_encode_image,
+    resize_pil_long_side,
     estimate_subject_ratio,
     map_ratio_to_aspect_ratio,
+    crop_image_to_ratio,
 )
 from comfy.utils import ProgressBar
 
@@ -45,6 +46,35 @@ def sanitize_text(s, max_len=1200):
     if len(t) > max_len:
         t = t[:max_len] + "...(省略)"
     return t
+
+
+def should_fill_aspect_ratio(ratio_str):
+    if ratio_str in ("原图1比例", "智能比例", "Free"):
+        return False
+    return isinstance(ratio_str, str) and ":" in ratio_str
+
+
+def apply_fill_crop(img, ratio_str, align):
+    if img is None:
+        return None
+    if not should_fill_aspect_ratio(ratio_str):
+        return img
+    return crop_image_to_ratio(img, ratio_str, align)
+
+
+def encode_pil_image(img, use_png, quality=85):
+    if img is None:
+        return None
+    buffered = io.BytesIO()
+    if use_png:
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        img.save(buffered, format="PNG")
+    else:
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        img.save(buffered, format="JPEG", quality=int(quality))
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 
 class Shaobkj_APINode:
@@ -73,6 +103,8 @@ class Shaobkj_APINode:
                     {"default": "原图1比例"},
                 ),
                 "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
+                "裁切对齐方式": (["居中", "顶部", "底部"], {"default": "居中"}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
@@ -114,34 +146,7 @@ class Shaobkj_APINode:
                 
         return closest_str
 
-    def resize_and_encode_image(self, image_tensor, long_side):
-        if image_tensor is None:
-            return None, 1.0
-        
-        # Convert tensor [B,H,W,C] to PIL
-        i = 255. * image_tensor.cpu().numpy()
-        img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8)[0])
-        
-        original_width, original_height = img.size
-        aspect_ratio = original_width / original_height
-        
-        # Calculate new size maintaining aspect ratio
-        if original_width > original_height:
-            new_width = long_side
-            new_height = int(long_side / aspect_ratio)
-        else:
-            new_height = long_side
-            new_width = int(long_side * aspect_ratio)
-            
-        img_resized = img.resize((new_width, new_height), Image.LANCZOS)
-        
-        buffered = io.BytesIO()
-        img_resized.save(buffered, format="JPEG", quality=85)
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        
-        return img_str, aspect_ratio
-
-    def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 接收模式, 等待时间, seed, **kwargs):
+    def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 接收模式, 裁切对齐方式, 保存格式, 等待时间, seed, **kwargs):
         api_key = API密钥
         base_origin = str(API地址).rstrip("/")
         gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
@@ -150,6 +155,8 @@ class Shaobkj_APINode:
         prompt = 提示词
         aspect_ratio = 图片比例
         accept_mode = 接收模式
+        crop_align = 裁切对齐方式
+        save_format_input = 保存格式
         long_side_limit = int(kwargs.get("输入图像-长边设置", 1280))
         timeout_val = None if int(等待时间) == 0 else int(等待时间)
         seed_value = seed
@@ -192,7 +199,14 @@ class Shaobkj_APINode:
         
         image_b64_list = []
         for idx, (name, tensor) in enumerate(image_inputs):
-            b64_str, ratio = self.resize_and_encode_image(tensor, long_side_limit)
+            pil_img = tensor_to_pil(tensor)
+            use_png = "PNG" in str(save_format_input)
+            pil_img = resize_pil_long_side(pil_img, long_side_limit)
+            pil_img = apply_fill_crop(pil_img, aspect_ratio, crop_align)
+            if pil_img is None:
+                continue
+            b64_str = encode_pil_image(pil_img, use_png, quality=85)
+            ratio = float(pil_img.size[0]) / float(pil_img.size[1])
             if idx == 0:
                 first_image_ratio = ratio
                 first_image_pil = tensor_to_pil(tensor)
@@ -200,7 +214,7 @@ class Shaobkj_APINode:
                 image_b64_list.append(b64_str)
                 parts.append({
                     "inline_data": {
-                        "mime_type": "image/jpeg",
+                        "mime_type": "image/png" if use_png else "image/jpeg",
                         "data": b64_str
                     }
                 })
@@ -711,6 +725,7 @@ def run_batch_generation_task(data):
         seed_val = int(data.get("seed", 0))
         save_path_input = data.get("save_path", "")
         save_format_input = data.get("save_format", "JPEG (默认95%)")
+        crop_align = data.get("crop_align", "居中")
         accept_mode = data.get("accept_mode", "智能模式")
 
         if not api_key:
@@ -744,14 +759,21 @@ def run_batch_generation_task(data):
 
         for idx, img in enumerate(tensor_images):
             try:
-                b64_str, img_ratio = resize_and_encode_image(img, long_side)
+                pil_img = tensor_to_pil(img) if isinstance(img, torch.Tensor) else img
+                use_png = "PNG" in str(save_format_input)
+                pil_img = resize_pil_long_side(pil_img, long_side)
+                pil_img = apply_fill_crop(pil_img, aspect_ratio, crop_align)
+                if pil_img is None:
+                    continue
+                b64_str = encode_pil_image(pil_img, use_png, quality=95)
+                img_ratio = float(pil_img.size[0]) / float(pil_img.size[1])
                 if idx == 0:
                     first_image_ratio = img_ratio
                 
                 if b64_str:
                     parts.append({
                         "inline_data": {
-                            "mime_type": "image/jpeg",
+                            "mime_type": "image/png" if use_png else "image/jpeg",
                             "data": b64_str
                         }
                     })
@@ -1108,6 +1130,7 @@ class Shaobkj_APINode_Batch:
                     {"default": "原图1比例"},
                 ),
                 "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
+                "裁切对齐方式": (["居中", "顶部", "底部"], {"default": "居中"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "出图数量": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1, "tooltip": "单次提交的任务总数/循环次数"}),
                 "指定文件名": ("STRING", {"default": "", "multiline": False, "placeholder": "为空则自动命名，输入则自动添加序号"}),
@@ -1128,7 +1151,7 @@ class Shaobkj_APINode_Batch:
     CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
-    def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 输入图像_长边设置=1280, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="JPEG (默认95%)", 最大并发数=5, 并发间隔=1.0, **kwargs):
+    def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 裁切对齐方式, 输入图像_长边设置=1280, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="JPEG (默认95%)", 最大并发数=5, 并发间隔=1.0, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True
         def get_val(v, default=None):
             if isinstance(v, list) and len(v) > 0:
@@ -1172,6 +1195,7 @@ class Shaobkj_APINode_Batch:
         # Lists
         resolution_list = normalize_list_input(分辨率)
         aspect_ratio_list = normalize_list_input(图片比例)
+        crop_align_list = normalize_list_input(裁切对齐方式)
         seed_list = normalize_list_input(seed)
         accept_mode_list = normalize_list_input(接收模式)
         save_path_list = normalize_list_input(保存路径)
@@ -1250,6 +1274,7 @@ class Shaobkj_APINode_Batch:
              if len(seed_list) > 1: lengths.append(len(seed_list))
              if len(resolution_list) > 1: lengths.append(len(resolution_list))
              if len(aspect_ratio_list) > 1: lengths.append(len(aspect_ratio_list))
+             if len(crop_align_list) > 1: lengths.append(len(crop_align_list))
              
              # Add Image Lengths
              for k, v in normalized_images.items():
@@ -1299,6 +1324,7 @@ class Shaobkj_APINode_Batch:
                 "prompt": p,
                 "aspect_ratio": aspect_ratio_list[i % len(aspect_ratio_list)],
                 "accept_mode": accept_mode_list[i % len(accept_mode_list)] if accept_mode_list else "智能模式",
+                "crop_align": crop_align_list[i % len(crop_align_list)] if crop_align_list else "居中",
                 "wait_time": 0,
                 "seed": s_val,
                 "save_path": save_path_list[i % len(save_path_list)],

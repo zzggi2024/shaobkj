@@ -243,6 +243,50 @@ def resize_pil_long_side(image, long_side):
     return image.resize((new_w, new_h), resample=Image.LANCZOS)
 
 
+def _parse_aspect_ratio_str(ratio_str):
+    try:
+        if isinstance(ratio_str, str) and ":" in ratio_str:
+            a, b = ratio_str.split(":", 1)
+            aw = float(a)
+            ah = float(b)
+            if aw > 0.0 and ah > 0.0:
+                return aw / ah
+    except Exception:
+        pass
+    return None
+
+
+def crop_image_to_ratio(img, ratio_str, align="居中"):
+    if img is None:
+        return img
+    r = _parse_aspect_ratio_str(ratio_str)
+    if r is None:
+        return img
+    w, h = img.size
+    if w <= 0 or h <= 0:
+        return img
+    src = float(w) / float(h)
+    if abs(src - r) < 1e-6:
+        return img
+    align_val = str(align) if align is not None else "居中"
+    if src > r:
+        new_w = int(round(h * r))
+        new_h = h
+        left = (w - new_w) // 2
+        top = 0
+    else:
+        new_h = int(round(w / r))
+        new_w = w
+        left = 0
+        if align_val == "顶部":
+            top = 0
+        elif align_val == "底部":
+            top = max(0, h - new_h)
+        else:
+            top = (h - new_h) // 2
+    return img.crop((left, top, left + new_w, top + new_h))
+
+
 def resize_and_encode_image(img, long_side):
     """
     Resize PIL image and encode to base64.
