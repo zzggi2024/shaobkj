@@ -256,7 +256,7 @@ def _parse_aspect_ratio_str(ratio_str):
     return None
 
 
-def crop_image_to_ratio(img, ratio_str, align="居中"):
+def crop_image_to_ratio(img, ratio_str, bbox=None):
     if img is None:
         return img
     r = _parse_aspect_ratio_str(ratio_str)
@@ -268,23 +268,164 @@ def crop_image_to_ratio(img, ratio_str, align="居中"):
     src = float(w) / float(h)
     if abs(src - r) < 1e-6:
         return img
-    align_val = str(align) if align is not None else "居中"
+    if not isinstance(bbox, tuple) or len(bbox) != 4:
+        return img
     if src > r:
         new_w = int(round(h * r))
         new_h = h
         left = (w - new_w) // 2
         top = 0
+        bx1, by1, bx2, by2 = bbox
+        min_left = int(round(bx2 - new_w))
+        max_left = int(round(bx1))
+        left = int(round((bx1 + bx2) / 2.0 - new_w / 2.0))
+        if min_left <= max_left:
+            if left < min_left:
+                left = min_left
+            if left > max_left:
+                left = max_left
+        left = max(0, min(left, w - new_w))
     else:
         new_h = int(round(w / r))
         new_w = w
         left = 0
-        if align_val == "顶部":
-            top = 0
-        elif align_val == "底部":
-            top = max(0, h - new_h)
-        else:
-            top = (h - new_h) // 2
+        bx1, by1, bx2, by2 = bbox
+        min_top = int(round(by2 - new_h))
+        max_top = int(round(by1))
+        top = int(round((by1 + by2) / 2.0 - new_h / 2.0))
+        if min_top <= max_top:
+            if top < min_top:
+                top = min_top
+            if top > max_top:
+                top = max_top
+        top = max(0, min(top, h - new_h))
     return img.crop((left, top, left + new_w, top + new_h))
+
+
+def _parse_bbox_from_dict(obj, w, h):
+    if not isinstance(obj, dict):
+        return None
+    if all(k in obj for k in ("x1", "y1", "x2", "y2")):
+        bx1, by1, bx2, by2 = obj.get("x1"), obj.get("y1"), obj.get("x2"), obj.get("y2")
+    elif all(k in obj for k in ("left", "top", "right", "bottom")):
+        bx1, by1, bx2, by2 = obj.get("left"), obj.get("top"), obj.get("right"), obj.get("bottom")
+    elif all(k in obj for k in ("x", "y", "w", "h")):
+        bx1, by1 = obj.get("x"), obj.get("y")
+        bx2 = None if obj.get("w") is None else float(bx1) + float(obj.get("w"))
+        by2 = None if obj.get("h") is None else float(by1) + float(obj.get("h"))
+    else:
+        return None
+    try:
+        bx1 = float(bx1)
+        by1 = float(by1)
+        bx2 = float(bx2)
+        by2 = float(by2)
+    except Exception:
+        return None
+    mx = max(bx1, by1, bx2, by2)
+    if mx <= 1.5:
+        bx1 *= w
+        bx2 *= w
+        by1 *= h
+        by2 *= h
+    bx1 = max(0.0, min(float(w), bx1))
+    bx2 = max(0.0, min(float(w), bx2))
+    by1 = max(0.0, min(float(h), by1))
+    by2 = max(0.0, min(float(h), by2))
+    if bx2 <= bx1 or by2 <= by1:
+        return None
+    return (bx1, by1, bx2, by2)
+
+
+def _parse_bbox_from_text(text, w, h):
+    if not isinstance(text, str):
+        return None
+    t = text.strip()
+    if not t:
+        return None
+    if "```" in t:
+        t = re.sub(r"```(?:json)?", "", t, flags=re.IGNORECASE).replace("```", "").strip()
+    start = t.find("{")
+    end = t.rfind("}")
+    if start >= 0 and end > start:
+        block = t[start:end + 1]
+        try:
+            obj = json.loads(block)
+            if isinstance(obj, list) and obj:
+                obj = obj[0]
+            bbox = _parse_bbox_from_dict(obj, w, h)
+            if bbox:
+                return bbox
+        except Exception:
+            pass
+    nums = re.findall(r"-?\d+(?:\.\d+)?", t)
+    if len(nums) >= 4:
+        try:
+            bx1, by1, bx2, by2 = [float(nums[i]) for i in range(4)]
+            obj = {"x1": bx1, "y1": by1, "x2": bx2, "y2": by2}
+            return _parse_bbox_from_dict(obj, w, h)
+        except Exception:
+            return None
+    return None
+
+
+def detect_subject_bbox(pil_img, subject_text, api_url, api_key, use_system_proxy=True, timeout_sec=30):
+    if pil_img is None:
+        return None
+    if not isinstance(subject_text, str) or not subject_text.strip():
+        return None
+    if not api_key:
+        return None
+    base_origin = str(api_url).rstrip("/")
+    gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
+    model = "gemini-3-pro-preview"
+    url = f"{gemini_base}/v1beta/models/{model}:generateContent"
+    img = resize_pil_long_side(pil_img, 1024)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    buffered = io.BytesIO()
+    img.save(buffered, format="JPEG", quality=90)
+    img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    prompt = f"在图像中定位主体：{subject_text}。只输出JSON，格式为{{\"x1\":0.0,\"y1\":0.0,\"x2\":1.0,\"y2\":1.0}}，坐标为0到1之间的小数，不要输出其它文字。"
+    payload = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
+            ]
+        }],
+        "generationConfig": {"temperature": 0.0}
+    }
+    disable_insecure_request_warnings()
+    session, proxies = create_requests_session(bool(use_system_proxy))
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    try:
+        res_json = post_json_with_retry(
+            session,
+            url,
+            headers=headers,
+            payload=payload,
+            timeout=(10, int(timeout_sec)),
+            proxies=proxies,
+            verify=False
+        )
+    except Exception:
+        return None
+    text = ""
+    if isinstance(res_json, dict):
+        candidates = res_json.get("candidates")
+        if isinstance(candidates, list) and candidates:
+            content = candidates[0].get("content") if isinstance(candidates[0], dict) else None
+            parts = content.get("parts") if isinstance(content, dict) else None
+            if isinstance(parts, list):
+                for part in parts:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        text += part.get("text")
+    if not text:
+        return None
+    w, h = pil_img.size
+    return _parse_bbox_from_text(text, w, h)
 
 
 def resize_and_encode_image(img, long_side):

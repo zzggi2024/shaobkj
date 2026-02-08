@@ -38,9 +38,8 @@ from .shaobkj_shared import (
     get_all_async_tasks,
     pil_to_tensor,
     tensor_to_pil,
-    estimate_subject_ratio,
-    map_ratio_to_aspect_ratio,
     crop_image_to_ratio,
+    detect_subject_bbox,
 )
 
 def get_closest_aspect_ratio(width, height):
@@ -101,8 +100,8 @@ def run_concurrent_task_internal(data):
         seed_val = int(data.get("seed", 0))
         save_path_input = data.get("save_path", "")
         save_format_input = data.get("save_format", "JPEG (默认95%)")
-        crop_align = data.get("crop_align", "居中")
         accept_mode = data.get("accept_mode", "智能模式")
+        subject_text = data.get("subject_text", "")
 
         if not api_key:
              raise ValueError("API Key is required")
@@ -149,6 +148,12 @@ def run_concurrent_task_internal(data):
             if w0 > 0 and h0 > 0:
                 first_image_ratio = float(w0) / float(h0)
                 first_image_size = (int(w0), int(h0))
+        subject_crop_ratio = None
+        if isinstance(subject_text, str) and subject_text.strip():
+            if aspect_ratio == "原图1比例" and first_image_size is not None:
+                subject_crop_ratio = get_closest_aspect_ratio(first_image_size[0], first_image_size[1])
+            elif aspect_ratio and aspect_ratio != "Free":
+                subject_crop_ratio = str(aspect_ratio)
 
         def get_target_size_local(res, ar, first_size):
             target_map = {"1k": 1024, "2k": 2048, "4k": 4096}
@@ -202,18 +207,14 @@ def run_concurrent_task_internal(data):
                 pil_image = pil_image.resize((int(target_w), int(target_h)), Image.LANCZOS)
             return pil_image
 
-        def should_fill_input():
-            if aspect_ratio in ("原图1比例", "智能比例", "Free"):
-                return False
-            ratio_str = str(aspect_ratio)
-            return ":" in ratio_str
-
         def encode_input_image(pil_image):
             if pil_image is None:
                 return None, None
             img = resize_pil_long_side(pil_image, long_side)
-            if should_fill_input():
-                img = crop_image_to_ratio(img, str(aspect_ratio), crop_align)
+            if subject_crop_ratio:
+                detect_timeout = 30 if wait_time <= 0 else max(5, min(30, int(wait_time)))
+                bbox = detect_subject_bbox(img, subject_text.strip(), api_url_base, api_key, use_proxy, detect_timeout)
+                img = crop_image_to_ratio(img, subject_crop_ratio, bbox)
             if "PNG" in str(save_format_input):
                 if img.mode != "RGBA":
                     img = img.convert("RGBA")
@@ -281,13 +282,7 @@ def run_concurrent_task_internal(data):
         payload["generationConfig"]["imageConfig"] = {"imageSize": str(resolution).upper()}
 
         target_aspect_ratio = aspect_ratio
-        if target_aspect_ratio == "智能比例":
-            if len(pil_images) > 0:
-                smart_ratio = estimate_subject_ratio(pil_images[0])
-                target_aspect_ratio = map_ratio_to_aspect_ratio(smart_ratio)
-            else:
-                target_aspect_ratio = "1:1"
-        elif target_aspect_ratio == "原图1比例" and len(pil_images) > 0:
+        if target_aspect_ratio == "原图1比例" and len(pil_images) > 0:
              # Calculate from first image (assuming image_1 is first in list)
              w, h = pil_images[0].size
              target_aspect_ratio = get_closest_aspect_ratio(w, h)
@@ -705,9 +700,9 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 ),
                 "使用系统代理": ("BOOLEAN", {"default": True}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
-                "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例", "智能比例"], {"default": "原图1比例"}),
+                "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例"}),
                 "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
-                "裁切对齐方式": (["居中", "顶部", "底部"], {"default": "居中"}),
+                "主体文本": ("STRING", {"default": "", "multiline": False}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
                 "Batch拆分模式": ("BOOLEAN", {"default": True}),
@@ -737,7 +732,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
-    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 裁切对齐方式, 保存路径, seed, **kwargs):
+    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 主体文本, 保存路径, seed, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True wraps everything in lists
         # We assume common parameters are same for all items (take first), OR we should support batching them too.
         # For simplicity, let's take the first item for "global" settings, but support batching for Prompts and Images.
@@ -756,7 +751,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
         prompts_val = 提示词 # Keep as list if it is list
         aspect_ratio_val = get_val(图片比例)
         accept_mode_val = get_val(接收模式)
-        crop_align_val = get_val(裁切对齐方式)
+        subject_text_val = get_val(主体文本)
         save_path_val = get_val(保存路径)
         
         # kwargs handling (also wrapped in lists)
@@ -794,7 +789,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             "prompt": prompts_val, # Might be list
             "aspect_ratio": aspect_ratio_val,
             "accept_mode": accept_mode_val,
-            "crop_align": crop_align_val,
+            "subject_text": subject_text_val,
             "long_side": long_side_val,
             "wait_time": wait_time_val,
             "seed": seed_val,
