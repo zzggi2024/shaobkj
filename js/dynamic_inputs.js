@@ -5,13 +5,10 @@ const DYNAMIC_NODES = [
     "Shaobkj_APINode",
     "文本-图像生成",
     "🤖图像生成",
-    "Shaobkj_Reverse_Node",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
-    "🤖 Shaobkj 反推",
     "🤖 Shaobkj -Sora视频",
     "🤖 Shaobkj -Veo视频",
-    "Shaobkj 反推",
     "Shaobkj -Sora视频",
     "Shaobkj -Veo视频",
     "Shaobkj_ConcurrentImageEdit_Sender",
@@ -24,7 +21,6 @@ const DYNAMIC_NODES = [
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
     "Shaobkj_APINode_Batch",
-    "Shaobkj_Reverse_Node",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
     "Shaobkj_ConcurrentImageEdit_Sender",
@@ -35,6 +31,8 @@ let started = false;
 const LONG_SIDE_WIDGET_NAME = "长边设置";
 const LONG_SIDE_WIDGET_LABEL = "输入图像-长边设置";
 const UPLOAD_LABEL_TEXT = "选择上传图像";
+const SEED_WIDGET_NAME = "seed";
+const CONTROL_WIDGET_NAME = "control_after_generate";
 
 // 🎨 Shaobkj Cyber-Spectrum Theme Definition
 const THEME_CONFIG = {
@@ -55,10 +53,7 @@ const THEME_CONFIG = {
 
     // ⚡ 极速系列 (效率与工具) - Matrix Green
     "Shaobkj_ConcurrentImageEdit_Sender": { color: "#00C853", bgcolor: "#003311" },
-    "Shaobkj_Reverse_Node": { color: "#00C853", bgcolor: "#003311" },
-    "🤖 Shaobkj 反推": { color: "#00C853", bgcolor: "#003311" },
-    "🤖并发-编辑-图像驱动": { color: "#00C853", bgcolor: "#003311" },
-    "Shaobkj 反推": { color: "#00C853", bgcolor: "#003311" }
+    "🤖并发-编辑-图像驱动": { color: "#00C853", bgcolor: "#003311" }
 };
 
 const DEFAULT_THEME = { color: "#006600", bgcolor: "#003300" }; // Fallback
@@ -394,6 +389,71 @@ function findWidget(node, name) {
     return node.widgets ? node.widgets.find((w) => w.name === name) : null;
 }
 
+function getWidgetControlMode() {
+    const settings = app?.ui?.settings;
+    if (settings && typeof settings.getSettingValue === "function") {
+        const keys = [
+            "widget_control_mode",
+            "node_widget_control_mode",
+            "component_control_mode",
+            "control_mode",
+        ];
+        for (const k of keys) {
+            const v = settings.getSettingValue(k);
+            if (v === "before" || v === "after") return v;
+        }
+    }
+    const raw = localStorage.getItem("Comfy.Settings");
+    if (raw) {
+        const obj = JSON.parse(raw);
+        for (const k of Object.keys(obj || {})) {
+            const key = String(k).toLowerCase();
+            const v = obj[k];
+            if (key.includes("control") && key.includes("mode")) {
+                if (v === "before" || v === "after") return v;
+            }
+        }
+    }
+    return "before";
+}
+
+function syncSeedControl(node) {
+    if (!node.widgets) return false;
+    let changed = false;
+    const mode = getWidgetControlMode();
+    const seedWidget = findWidget(node, SEED_WIDGET_NAME);
+    if (seedWidget) {
+        if (!seedWidget.options) seedWidget.options = {};
+        const shouldAfter = mode === "after";
+        if (seedWidget.options.control_after_generate !== shouldAfter) {
+            seedWidget.options.control_after_generate = shouldAfter;
+            changed = true;
+        }
+    }
+    const controlWidget = findWidget(node, CONTROL_WIDGET_NAME);
+    if (controlWidget && controlWidget.options && Array.isArray(controlWidget.options.values)) {
+        const label = mode === "after" ? "生成后控制" : "生成前控制";
+        let nextValue = mode;
+        if (controlWidget.options.values.includes(label)) {
+            nextValue = label;
+        } else if (!controlWidget.options.values.includes(mode)) {
+            nextValue = controlWidget.value;
+        }
+        if (controlWidget.value !== nextValue) {
+            controlWidget.value = nextValue;
+            changed = true;
+        }
+        if (controlWidget.label !== label) {
+            controlWidget.label = label;
+            changed = true;
+        }
+    }
+    if (changed) {
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
+}
+
 app.registerExtension({
     name: "Shaobkj.DynamicInputs",
     async setup(app) {
@@ -425,6 +485,7 @@ app.registerExtension({
                     setupLinkWidget(node);
                     setupLongSideWidget(node);
                     setupUploadButtonLabel(node);
+                    syncSeedControl(node);
                     if (shouldManageDynamicInputsByNode(node)) {
                         manageInputs(node);
                     } else if (node.inputs && Array.isArray(node.inputs) && node.inputs.length) {
@@ -485,6 +546,7 @@ app.registerExtension({
                     setupLinkWidget(this);
                     setupLongSideWidget(this);
                     setupUploadButtonLabel(this);
+                    syncSeedControl(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
                     if (needsDynamicInputs) manageInputs(this, true);
                 }, 50);

@@ -35,23 +35,23 @@ class Shaobkj_Sora_Video:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
-                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
-                "模型": (["sora-2", "sora-2-pro"], {"default": "sora-2"}),
-                "使用系统代理": ("BOOLEAN", {"default": True}),
-                "任务类型": (["智能模式", "文生视频", "图生视频", "角色视频"], {"default": "智能模式"}),
-                "提示词": ("STRING", {"multiline": True, "default": "画面动起来"}),
-                "生成时长": (["10", "15", "25"], {"default": "10"}),
-                "分辨率": (["9:16", "16:9"], {"default": "9:16"}),
-                "长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
-                "等待时间": ("INT", {"default": 0, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
-                "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
+                "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
+                "模型": (["sora-2", "sora-2-pro"], {"default": "sora-2", "tooltip": "视频模型选择；推荐：sora-2"}),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
+                "任务类型": (["智能模式", "文生视频", "图生视频", "角色视频"], {"default": "智能模式", "tooltip": "生成模式；推荐：智能模式"}),
+                "提示词": ("STRING", {"multiline": True, "default": "画面动起来", "tooltip": "视频内容描述；推荐：简洁具体"}),
+                "生成时长": (["10", "15", "25"], {"default": "10", "tooltip": "视频时长(秒)；推荐：10"}),
+                "分辨率": (["9:16", "16:9"], {"default": "9:16", "tooltip": "视频画幅比例；推荐：9:16"}),
+                "长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
+                "等待时间": ("INT", {"default": 0, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待；推荐：0"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
+                "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False, "tooltip": "API 申请入口；推荐：默认地址"}),
             },
             "optional": {
-                "参考图": ("IMAGE",),
-                "角色视频URL": ("STRING", {"multiline": False, "default": ""}),
-                "角色时间戳": ("STRING", {"multiline": False, "default": "1,3"}),
+                "参考图": ("IMAGE", {"tooltip": "图生视频参考图；推荐：图生视频时必填"}),
+                "角色视频URL": ("STRING", {"multiline": False, "default": "", "tooltip": "角色视频参考 URL；推荐：角色视频模式填写"}),
+                "角色时间戳": ("STRING", {"multiline": False, "default": "1,3", "tooltip": "角色时间戳(秒)；推荐：1,3"}),
             },
         }
 

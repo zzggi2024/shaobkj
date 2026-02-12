@@ -688,36 +688,36 @@ class Shaobkj_ConcurrentImageEdit_Sender:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True}),
-                "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
-                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
+                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "编辑描述，支持多行；推荐：每行一条提示词"}),
+                "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
                 "模型选择": (
                     [
                         "gemini-3-pro-image-preview",
                         "智能加载",
                     ],
-                    {"default": "gemini-3-pro-image-preview"},
+                    {"default": "gemini-3-pro-image-preview", "tooltip": "模型选择或智能加载；推荐：gemini-3-pro-image-preview"},
                 ),
-                "使用系统代理": ("BOOLEAN", {"default": True}),
-                "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
-                "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例"}),
-                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
-                "主体文本": ("STRING", {"default": "", "multiline": False}),
-                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
-                "Batch拆分模式": ("BOOLEAN", {"default": True}),
-                "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)"}),
-                "保存路径": ("STRING", {"default": "Shaobkj_Concurrent", "multiline": False}),
-                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
-                "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数"}),
-                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交之间的间隔时间(秒)"}),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
+                "分辨率": (["1k", "2k", "4k"], {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"}),
+                "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例", "tooltip": "输出画面比例；推荐：原图1比例"}),
+                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式", "tooltip": "API 返回内容处理方式；推荐：智能模式"}),
+                "主体文本": ("STRING", {"default": "", "multiline": False, "tooltip": "主体识别裁切关键词；推荐：留空"}),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
+                "Batch拆分模式": ("BOOLEAN", {"default": True, "tooltip": "是否拆分批次提交；推荐：开启"}),
+                "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)", "tooltip": "批次对齐策略；推荐：循环补全(Max)"}),
+                "保存路径": ("STRING", {"default": "Shaobkj_Concurrent", "multiline": False, "tooltip": "相对输出目录的子路径；推荐：Shaobkj_Concurrent"}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)", "tooltip": "输出保存格式；推荐：JPEG (默认95%)"}),
+                "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数；推荐：5"}),
+                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交间隔(秒)；推荐：1.0"}),
             },
             "optional": {
-                 "文件名来源": ("STRING", {"forceInput": True, "multiline": False, "dynamicPrompts": False}),
-                 "image_1": ("IMAGE",),
-                 "image_2": ("IMAGE",),
-                 "image_3": ("IMAGE",),
-                 "image_4": ("IMAGE",),
+                 "文件名来源": ("STRING", {"forceInput": True, "multiline": False, "dynamicPrompts": False, "tooltip": "用于输出命名的文件名来源；推荐：留空"}),
+                 "image_1": ("IMAGE", {"tooltip": "输入图像1；推荐：连接参考图"}),
+                 "image_2": ("IMAGE", {"tooltip": "输入图像2；推荐：可选"}),
+                 "image_3": ("IMAGE", {"tooltip": "输入图像3；推荐：可选"}),
+                 "image_4": ("IMAGE", {"tooltip": "输入图像4；推荐：可选"}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -1032,7 +1032,7 @@ class Shaobkj_Load_Image_Path:
         files = folder_paths.filter_files_content_types(files, ["image"])
         return {
             "required": {
-                "image": (sorted(files), {"image_upload": True}),
+                "image": (sorted(files), {"image_upload": True, "tooltip": "从输入目录选择图像文件；推荐：选择一张图像"}),
             }
         }
 
@@ -1075,11 +1075,11 @@ class Shaobkj_Load_Batch_Images:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "directory": ("STRING", {"default": "", "multiline": False, "placeholder": "输入文件夹路径 (如 C:\\images)"}),
-                "image_load_cap": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "限制加载数量，0为不限制"}),
-                "start_index": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1}),
-                "load_always": ("BOOLEAN", {"default": False, "label_on": "enabled", "label_off": "disabled"}),
-                "sort_method": (["numerical", "alphabetical", "date"], {"default": "numerical"}),
+                "directory": ("STRING", {"default": "", "multiline": False, "placeholder": "输入文件夹路径 (如 C:\\images)", "tooltip": "图片所在文件夹路径；推荐：填写有效路径"}),
+                "image_load_cap": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "限制加载数量，0为不限制；推荐：0"}),
+                "start_index": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "从第几个文件开始加载；推荐：0"}),
+                "load_always": ("BOOLEAN", {"default": False, "label_on": "enabled", "label_off": "disabled", "tooltip": "每次运行都重新加载；推荐：关闭"}),
+                "sort_method": (["numerical", "alphabetical", "date"], {"default": "numerical", "tooltip": "文件排序方式；推荐：numerical"}),
             }
         }
 
@@ -1177,130 +1177,6 @@ class Shaobkj_Load_Batch_Images:
 
         return (images_out, masks_out, filenames_out)
 
-class Shaobkj_Transparent_Background:
-    def __init__(self):
-        pass
-
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "图像": ("IMAGE",),
-                "容差": ("FLOAT", {"default": 20.0, "min": 0.0, "max": 100.0, "step": 0.5}),
-                "连通": ("BOOLEAN", {"default": True}),
-                "羽化": ("INT", {"default": 2, "min": 0, "max": 50, "step": 1}),
-                "取样方式": (["边缘均值", "四角均值"], {"default": "边缘均值"}),
-                "文字优先": ("BOOLEAN", {"default": True}),
-                "文字对比阈值": ("FLOAT", {"default": 0.08, "min": 0.0, "max": 1.0, "step": 0.01}),
-            }
-        }
-
-    RETURN_TYPES = ("IMAGE", "MASK")
-    RETURN_NAMES = ("图像", "遮罩")
-    FUNCTION = "make_transparent"
-    CATEGORY = "🤖shaobkj-APIbox"
-
-    def _flood_fill_background(self, dist2, tol2):
-        h, w = dist2.shape
-        mask = np.zeros((h, w), dtype=bool)
-        visited = np.zeros((h, w), dtype=bool)
-        q = deque()
-        for x in range(w):
-            if dist2[0, x] <= tol2:
-                q.append((0, x))
-            if dist2[h - 1, x] <= tol2:
-                q.append((h - 1, x))
-        for y in range(h):
-            if dist2[y, 0] <= tol2:
-                q.append((y, 0))
-            if dist2[y, w - 1] <= tol2:
-                q.append((y, w - 1))
-        while q:
-            y, x = q.popleft()
-            if visited[y, x]:
-                continue
-            visited[y, x] = True
-            if dist2[y, x] > tol2:
-                continue
-            mask[y, x] = True
-            if y > 0:
-                q.append((y - 1, x))
-            if y < h - 1:
-                q.append((y + 1, x))
-            if x > 0:
-                q.append((y, x - 1))
-            if x < w - 1:
-                q.append((y, x + 1))
-        return mask
-
-    def make_transparent(self, 图像, 容差, 连通, 羽化, 取样方式, 文字优先, 文字对比阈值):
-        images = 图像
-        if isinstance(images, torch.Tensor) and images.dim() == 3:
-            images = images.unsqueeze(0)
-
-        tol = float(容差) / 100.0
-        feather = int(羽化)
-        use_contiguous = bool(连通)
-        sample_mode = str(取样方式)
-        text_first = bool(文字优先)
-        text_contrast = float(文字对比阈值)
-
-        out_images = []
-        out_masks = []
-        for i in range(images.shape[0]):
-            img = images[i]
-            if isinstance(img, torch.Tensor) and img.dim() == 4:
-                img = img[0]
-            img = torch.clamp(img, 0.0, 1.0)
-            if img.shape[-1] > 3:
-                img = img[:, :, :3]
-            img_np = img.detach().cpu().numpy()
-            h, w = img_np.shape[0], img_np.shape[1]
-
-            if sample_mode == "四角均值":
-                ref = np.stack(
-                    [img_np[0, 0], img_np[0, w - 1], img_np[h - 1, 0], img_np[h - 1, w - 1]],
-                    axis=0,
-                ).mean(axis=0)
-            else:
-                edges = np.concatenate(
-                    [img_np[0, :, :], img_np[h - 1, :, :], img_np[:, 0, :], img_np[:, w - 1, :]],
-                    axis=0,
-                )
-                ref = edges.mean(axis=0)
-
-            diff = img_np - ref
-            dist2 = np.sum(diff * diff, axis=2)
-            tol2 = tol * tol
-            if use_contiguous:
-                bg_mask = self._flood_fill_background(dist2, tol2)
-            else:
-                bg_mask = dist2 <= tol2
-            if text_first and text_contrast > 0.0:
-                gray = 0.299 * img_np[:, :, 0] + 0.587 * img_np[:, :, 1] + 0.114 * img_np[:, :, 2]
-                dx = np.abs(gray[:, 1:] - gray[:, :-1])
-                dy = np.abs(gray[1:, :] - gray[:-1, :])
-                dx = np.pad(dx, ((0, 0), (0, 1)), mode="edge")
-                dy = np.pad(dy, ((0, 1), (0, 0)), mode="edge")
-                grad = np.maximum(dx, dy)
-                bg_mask = np.logical_and(bg_mask, grad < text_contrast)
-
-            bg_mask_f = bg_mask.astype(np.float32)
-            if feather > 0:
-                mask_t = torch.from_numpy(bg_mask_f).unsqueeze(0).unsqueeze(0)
-                k = feather * 2 + 1
-                mask_t = torch.nn.functional.avg_pool2d(mask_t, kernel_size=k, stride=1, padding=feather)
-                bg_mask_f = mask_t.squeeze(0).squeeze(0).cpu().numpy()
-
-            fg_mask = 1.0 - np.clip(bg_mask_f, 0.0, 1.0)
-            rgb = img_np * fg_mask[:, :, None]
-            alpha = fg_mask[:, :, None]
-            rgba = np.concatenate([rgb, alpha], axis=2)
-            out_images.append(torch.from_numpy(rgba.astype(np.float32)))
-            out_masks.append(torch.from_numpy(fg_mask.astype(np.float32)))
-
-        return (torch.stack(out_images, dim=0), torch.stack(out_masks, dim=0))
-
 class Shaobkj_Image_Save:
     def __init__(self):
         pass
@@ -1309,12 +1185,12 @@ class Shaobkj_Image_Save:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "图像": ("IMAGE",),
-                "保存路径": ("STRING", {"default": "Shaobkj_Save", "multiline": False}),
-                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
-                "文件名": ("STRING", {"default": "image", "multiline": False}),
-                "质量": ("INT", {"default": 95, "min": 1, "max": 100, "step": 1}),
-                "预览": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭"}),
+                "图像": ("IMAGE", {"tooltip": "输入图像；推荐：连接上游图像输出"}),
+                "保存路径": ("STRING", {"default": "Shaobkj_Save", "multiline": False, "tooltip": "相对输出目录的子路径；推荐：Shaobkj_Save"}),
+                "保存格式": (["jpg", "png（透明底图）", "png（无损）"], {"default": "jpg", "tooltip": "保存格式；推荐：jpg"}),
+                "文件名": ("STRING", {"default": "image", "multiline": False, "tooltip": "保存文件名(不含扩展名)；推荐：image"}),
+                "质量": ("INT", {"default": 100, "min": 1, "max": 100, "step": 1, "tooltip": "JPG 质量(1-100)；推荐：100"}),
+                "预览": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭", "tooltip": "是否在界面显示预览；推荐：开启"}),
             }
         }
 
@@ -1338,16 +1214,20 @@ class Shaobkj_Image_Save:
             os.makedirs(custom_dir, exist_ok=True)
             out_dir = custom_dir
 
-        save_params = {"format": "JPEG", "quality": int(质量)}
-        ext = ".jpg"
-        is_png = bool(保存格式 and "PNG" in 保存格式)
-        is_webp = bool(保存格式 and "WEBP" in 保存格式)
-        if is_png:
+        fmt_label = 保存格式 if isinstance(保存格式, str) else str(保存格式)
+        is_jpg = fmt_label == "jpg"
+        is_png_transparent = fmt_label == "png（透明底图）"
+        is_png_lossless = fmt_label == "png（无损）"
+
+        if is_jpg:
+            save_params = {"format": "JPEG", "quality": int(质量)}
+            ext = ".jpg"
+        elif is_png_transparent or is_png_lossless:
             save_params = {"format": "PNG"}
             ext = ".png"
-        elif is_webp:
-            save_params = {"format": "WEBP", "lossless": True}
-            ext = ".webp"
+        else:
+            save_params = {"format": "JPEG", "quality": int(质量)}
+            ext = ".jpg"
 
         base_name = str(文件名).strip() if 文件名 is not None else ""
         base_name = os.path.splitext(os.path.basename(base_name))[0]
@@ -1369,11 +1249,24 @@ class Shaobkj_Image_Save:
                 arr = arr[:, :, None]
             if arr.shape[-1] == 1:
                 arr = np.repeat(arr, 3, axis=2)
-            if arr.shape[-1] >= 4 and is_png:
-                img_arr = (arr[:, :, :4] * 255.0).astype(np.uint8)
-                pil_img = Image.fromarray(img_arr, mode="RGBA")
+            if is_png_transparent:
+                if arr.shape[-1] >= 4:
+                    img_arr = (arr[:, :, :4] * 255.0).astype(np.uint8)
+                    pil_img = Image.fromarray(img_arr, mode="RGBA")
+                else:
+                    alpha = np.ones((arr.shape[0], arr.shape[1], 1), dtype=arr.dtype)
+                    rgba = np.concatenate([arr[:, :, :3], alpha], axis=2)
+                    img_arr = (rgba * 255.0).astype(np.uint8)
+                    pil_img = Image.fromarray(img_arr, mode="RGBA")
             else:
-                img_arr = (arr[:, :, :3] * 255.0).astype(np.uint8)
+                if arr.shape[-1] >= 4:
+                    rgb = arr[:, :, :3]
+                    alpha = np.clip(arr[:, :, 3:4], 0.0, 1.0)
+                    white = np.ones_like(rgb)
+                    comp = np.clip(rgb + (1.0 - alpha) * white, 0.0, 1.0)
+                    img_arr = (comp * 255.0).astype(np.uint8)
+                else:
+                    img_arr = (arr[:, :, :3] * 255.0).astype(np.uint8)
                 pil_img = Image.fromarray(img_arr, mode="RGB")
             filename = f"{base_name}{ext}"
             out_path = os.path.join(out_dir, filename)
@@ -1430,26 +1323,26 @@ class Shaobkj_FourWayRepair_HD:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "图像": ("IMAGE",),
-                "模型": ("MODEL",),
-                "VAE": ("VAE",),
-                "正面条件": ("CONDITIONING",),
-                "负面条件": ("CONDITIONING",),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
-                "steps": ("INT", {"default": 20, "min": 1, "max": 10000}),
-                "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1}),
-                "采样器": (comfy.samplers.KSampler.SAMPLERS, ),
-                "调度器": (comfy.samplers.KSampler.SCHEDULERS, ),
-                "修补带宽百分比": ("FLOAT", {"default": 0.15, "min": 0.01, "max": 0.5, "step": 0.01}),
-                "软边比例": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 1.0, "step": 0.05}),
-                "denoise": ("FLOAT", {"default": 0.75, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "启用分块": ("BOOLEAN", {"default": True}),
-                "分块尺寸": ("INT", {"default": 1024, "min": 256, "max": 4096, "step": 64}),
-                "分块重叠": ("INT", {"default": 64, "min": 0, "max": 512, "step": 8}),
-                "噪声遮罩": ("BOOLEAN", {"default": True}),
+                "图像": ("IMAGE", {"tooltip": "输入图像；推荐：待修复图像"}),
+                "模型": ("MODEL", {"tooltip": "使用的模型；推荐：与工程一致模型"}),
+                "VAE": ("VAE", {"tooltip": "VAE 模型；推荐：与模型匹配"}),
+                "正面条件": ("CONDITIONING", {"tooltip": "正面提示词条件；推荐：连接正面条件"}),
+                "负面条件": ("CONDITIONING", {"tooltip": "负面提示词条件；推荐：连接负面条件"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "随机种子；推荐：0"}),
+                "steps": ("INT", {"default": 20, "min": 1, "max": 10000, "tooltip": "采样步数；推荐：20"}),
+                "cfg": ("FLOAT", {"default": 8.0, "min": 0.0, "max": 100.0, "step": 0.1, "tooltip": "CFG 引导强度；推荐：8.0"}),
+                "采样器": (comfy.samplers.KSampler.SAMPLERS, {"tooltip": "采样器类型；推荐：默认值"}),
+                "调度器": (comfy.samplers.KSampler.SCHEDULERS, {"tooltip": "调度器类型；推荐：默认值"}),
+                "修补带宽百分比": ("FLOAT", {"default": 0.15, "min": 0.01, "max": 0.5, "step": 0.01, "tooltip": "修补带宽比例；推荐：0.15"}),
+                "软边比例": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 1.0, "step": 0.05, "tooltip": "修补软边比例；推荐：0.5"}),
+                "denoise": ("FLOAT", {"default": 0.75, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "去噪强度；推荐：0.75"}),
+                "启用分块": ("BOOLEAN", {"default": True, "tooltip": "是否启用分块处理；推荐：开启"}),
+                "分块尺寸": ("INT", {"default": 1024, "min": 256, "max": 4096, "step": 64, "tooltip": "分块大小；推荐：1024"}),
+                "分块重叠": ("INT", {"default": 64, "min": 0, "max": 512, "step": 8, "tooltip": "分块重叠像素；推荐：64"}),
+                "噪声遮罩": ("BOOLEAN", {"default": True, "tooltip": "是否使用噪声遮罩；推荐：开启"}),
             },
             "optional": {
-                "遮罩": ("MASK",),
+                "遮罩": ("MASK", {"tooltip": "可选遮罩；推荐：需要区域时连接"}),
             }
         }
 
@@ -1608,6 +1501,30 @@ class Shaobkj_FourWayRepair_HD:
         latent_out = {"samples": torch.cat(latents, dim=0)} if latents else {"samples": torch.empty((0,))}
         return (torch.stack(batch, dim=0), latent_out)
 
+class Shaobkj_Fixed_Seed:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "固定随机种子；推荐：0"})
+            }
+        }
+
+    RETURN_TYPES = ("INT",)
+    RETURN_NAMES = ("seed",)
+    FUNCTION = "get_seed"
+    CATEGORY = "🤖shaobkj-APIbox"
+
+    def get_seed(self, seed):
+        return (int(seed),)
+
+    @classmethod
+    def IS_CHANGED(cls, seed):
+        return seed
+
 # ----------------------------------------------------------------------------
 # Node Registration
 # ----------------------------------------------------------------------------
@@ -1616,16 +1533,16 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
     "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
     "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
-    "Shaobkj_Transparent_Background": Shaobkj_Transparent_Background,
     "Shaobkj_Image_Save": Shaobkj_Image_Save,
-    "Shaobkj_FourWayRepair_HD": Shaobkj_FourWayRepair_HD
+    "Shaobkj_FourWayRepair_HD": Shaobkj_FourWayRepair_HD,
+    "Shaobkj_Fixed_Seed": Shaobkj_Fixed_Seed
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
     "Shaobkj_Load_Image_Path": "🤖加载图像",
     "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)",
-    "Shaobkj_Transparent_Background": "🤖透明背景",
     "Shaobkj_Image_Save": "🤖图像保存",
-    "Shaobkj_FourWayRepair_HD": "🤖四方修复高清"
+    "Shaobkj_FourWayRepair_HD": "🤖四方修复高清",
+    "Shaobkj_Fixed_Seed": "🤖固定随机种子"
 }

@@ -71,29 +71,29 @@ class Shaobkj_APINode:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True}),
-                "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
-                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
+                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "生成内容描述，支持多行；推荐：每行一条提示词"}),
+                "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
                 "模型选择": (
                     [
                         "gemini-3-pro-image-preview",
                         "智能加载",
                     ],
-                    {"default": "gemini-3-pro-image-preview"},
+                    {"default": "gemini-3-pro-image-preview", "tooltip": "模型选择或智能加载；推荐：gemini-3-pro-image-preview"},
                 ),
-                "使用系统代理": ("BOOLEAN", {"default": True}),
-                "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
+                "分辨率": (["1k", "2k", "4k"], {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"}),
                 "图片比例": (
                     ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
-                    {"default": "原图1比例"},
+                    {"default": "原图1比例", "tooltip": "输出画面比例；推荐：原图1比例"},
                 ),
-                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
-                "主体文本": ("STRING", {"default": "", "multiline": False}),
-                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
-                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
-                "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
-                "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False}),
+                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式", "tooltip": "API 返回内容处理方式；推荐：智能模式"}),
+                "主体文本": ("STRING", {"default": "", "multiline": False, "tooltip": "主体识别裁切关键词；推荐：留空"}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)", "tooltip": "输出保存格式；推荐：JPEG (默认95%)"}),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
+                "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待；推荐：180"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
+                "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False, "tooltip": "API 申请入口；推荐：默认地址"}),
             },
         }
 
@@ -1109,34 +1109,35 @@ class Shaobkj_APINode_Batch:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True}),
-                "API密钥": ("STRING", {"default": api_key_default, "multiline": False}),
-                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False}),
+                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "生成内容描述，支持多行；推荐：每行一条提示词"}),
+                "提示词列表": ("BOOLEAN", {"default": False, "label_on": "开启", "label_off": "关闭", "tooltip": "是否将输入视为提示词列表；开启时按行拆分，关闭时视为单条提示词"}),
+                "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
                 "模型选择": (
                     [
                         "gemini-3-pro-image-preview",
                         "智能加载",
                     ],
-                    {"default": "gemini-3-pro-image-preview"},
+                    {"default": "gemini-3-pro-image-preview", "tooltip": "模型选择或智能加载；推荐：gemini-3-pro-image-preview"},
                 ),
-                "使用系统代理": ("BOOLEAN", {"default": True}),
-                "分辨率": (["1k", "2k", "4k"], {"default": "1k"}),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
+                "分辨率": (["1k", "2k", "4k"], {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"}),
                 "图片比例": (
                     ["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"],
-                    {"default": "原图1比例"},
+                    {"default": "原图1比例", "tooltip": "输出画面比例；推荐：原图1比例"},
                 ),
-                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式"}),
-                "主体文本": ("STRING", {"default": "", "multiline": False}),
-                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280"}),
-                "出图数量": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1, "tooltip": "单次提交的任务总数/循环次数"}),
-                "指定文件名": ("STRING", {"default": "", "multiline": False, "placeholder": "为空则自动命名，输入则自动添加序号"}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
-                "Batch拆分模式": ("BOOLEAN", {"default": True}),
-                "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)"}),
-                "保存路径": ("STRING", {"default": "Shaobkj_Concurrent", "multiline": False}),
-                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)"}),
-                "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数"}),
-                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交之间的间隔时间(秒)"}),
+                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式", "tooltip": "API 返回内容处理方式；推荐：智能模式"}),
+                "主体文本": ("STRING", {"default": "", "multiline": False, "tooltip": "主体识别裁切关键词；推荐：留空"}),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
+                "出图数量": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1, "tooltip": "单次提交的任务总数/循环次数；推荐：1"}),
+                "指定文件名": ("STRING", {"default": "", "multiline": False, "placeholder": "为空则自动命名，输入则自动添加序号", "tooltip": "为空自动命名，可自定义前缀；推荐：留空"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
+                "Batch拆分模式": ("BOOLEAN", {"default": True, "tooltip": "是否拆分批次提交；推荐：开启"}),
+                "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)", "tooltip": "批次对齐策略；推荐：循环补全(Max)"}),
+                "保存路径": ("STRING", {"default": "Shaobkj_Concurrent", "multiline": False, "tooltip": "相对输出目录的子路径；推荐：Shaobkj_Concurrent"}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)", "tooltip": "输出保存格式；推荐：JPEG (默认95%)"}),
+                "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数；推荐：5"}),
+                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交间隔(秒)；推荐：1.0"}),
             },
         }
 
@@ -1147,7 +1148,7 @@ class Shaobkj_APINode_Batch:
     CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
-    def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 主体文本, 输入图像_长边设置=1280, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="JPEG (默认95%)", 最大并发数=5, 并发间隔=1.0, **kwargs):
+    def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 主体文本, 输入图像_长边设置=1280, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="JPEG (默认95%)", 最大并发数=5, 并发间隔=1.0, 提示词列表=False, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True
         def get_val(v, default=None):
             if isinstance(v, list) and len(v) > 0:
@@ -1215,32 +1216,23 @@ class Shaobkj_APINode_Batch:
             raise ValueError("API Key is required.")
 
         # Prepare Prompts
+        prompt_list_mode = get_val(提示词列表, False)
         prompts = []
         raw_prompts = normalize_list_input(提示词)
-        for p in raw_prompts:
-            if isinstance(p, str) and "\n" in p and len(raw_prompts) == 1:
-                # If single prompt has multiple lines, treat as one prompt?
-                # Wait, original logic:
-                # if ... len(raw_prompts) == 1: lines = ... prompts.extend(lines)
-                # This splits a single multiline string into multiple prompts.
-                # If the user wants 1 prompt with newlines, this breaks it.
-                # But legacy logic did this. User said "logic same as Concurrent-Sender".
-                # Concurrent-Sender logic in node_concurrent_image_edit.py (which I read before) does file reading.
-                # Since I'm removing file reading, I should check if I should keep this splitting behavior.
-                # The user said "logic same as Concurrent-Sender".
-                # Concurrent-Sender supports multiline prompt box as one prompt?
-                # Usually ComfyUI string widgets are multiline.
-                # If I type "A cat\nwith a hat", is it 1 prompt or 2?
-                # If it's 1 prompt, I shouldn't split.
-                # But lines 924-926 in original file did split.
-                # I'll keep the logic for now to be safe, or check lines 924-926.
-                # Actually, let's just append p.
-                # But wait, if user pastes a list of prompts separated by newlines, they expect batch.
-                # So I'll keep the splitting logic if it's a single input item.
-                lines = [line.strip() for line in p.splitlines() if line.strip()]
-                prompts.extend(lines)
-            else:
-                prompts.append(str(p))
+        
+        if prompt_list_mode:
+            # List Mode: Split lines, ignore batch_count logic (effectively 1 per line)
+            for p in raw_prompts:
+                if isinstance(p, str):
+                    lines = [line.strip() for line in p.splitlines() if line.strip()]
+                    prompts.extend(lines)
+        else:
+            # Single Prompt Mode: Keep multiline string as one prompt, use batch_count
+            for p in raw_prompts:
+                if isinstance(p, str) and p.strip():
+                    # Repeat prompt for batch_count times
+                    for _ in range(batch_count_val):
+                        prompts.append(p)
 
         prompts = [str(p) for p in prompts if str(p).strip()]
         if not prompts:
@@ -1252,8 +1244,8 @@ class Shaobkj_APINode_Batch:
         # If we have multiple prompts (from list input or multiline split),
         # we strictly follow the prompt count (1 image per prompt).
         # ---------------------------------------------------------------------------
-        if len(prompts) > 1:
-            print(f"[ComfyUI-shaobkj] ℹ️ 检测到多条提示词输入 (数量: {len(prompts)})。'出图数量'参数将失效，强制按提示词列表生成。")
+        if prompt_list_mode and batch_count_val > 1:
+            print(f"[ComfyUI-shaobkj] ℹ️ 提示词列表模式已开启 (检测到 {len(prompts)} 条提示词)。'出图数量'参数 ({batch_count_val}) 将失效，强制按提示词列表生成。")
             batch_count_val = 1
         # ---------------------------------------------------------------------------
 
