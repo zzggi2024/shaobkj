@@ -59,18 +59,6 @@ app.registerExtension({
                     this.addWidget("button", buttonName, "Send", buttonAction);
                 }
 
-                // Add "API申请地址" Button if not present
-                const apiButtonName = "🔗 打开 API 申请地址";
-                const hasApiButton = this.widgets && this.widgets.some(w => w.name === apiButtonName);
-                
-                if (!hasApiButton) {
-                    const defaultUrl = "https://yhmx.work/login?expired=true";
-                    // Use a string value for the button to prevent null-reference errors in other extensions
-                    this.addWidget("button", apiButtonName, "Open URL", () => {
-                        window.open(defaultUrl, "_blank");
-                    });
-                }
-
                 // Dynamic Input Slots are now managed by dynamic_inputs.js to avoid conflicts
                 // We no longer perform checkSlots() here.
                 

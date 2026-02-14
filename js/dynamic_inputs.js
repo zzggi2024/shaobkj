@@ -3,14 +3,11 @@ import { app } from "/scripts/app.js";
 
 const DYNAMIC_NODES = [
     "Shaobkj_APINode",
-    "文本-图像生成",
     "🤖图像生成",
-    "Shaobkj_Sora_Video",
+    "Shaobkj_Sora_Video", 
     "Shaobkj_Veo_Video",
     "🤖 Shaobkj -Sora视频",
     "🤖 Shaobkj -Veo视频",
-    "Shaobkj -Sora视频",
-    "Shaobkj -Veo视频",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "🤖并发-编辑-图像驱动",
     "Shaobkj_APINode_Batch",
@@ -25,6 +22,10 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Veo_Video",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "Shaobkj_LLM_App",
+    "Shaobkj_Load_Image_Path",
+    "Shaobkj_Load_Batch_Images",
+    "Shaobkj_Image_Save",
+    "Shaobkj_Fixed_Seed",
 ];
 const MIN_INPUTS = 2;
 let started = false;
@@ -117,12 +118,22 @@ function getDynamicInputSpec(node) {
 function isShaobkjRuntimeNode(node) {
     const t = node?.type;
     const title = node?.title;
+    
+    // Debug logging
     if (t && (SHAOBKJ_NODE_TYPES.includes(t) || DYNAMIC_NODES.includes(t))) {
+        console.log("[Shaobkj Debug] Node matched by type:", t);
         return true;
     }
     if (title && typeof title === "string" && title.toLowerCase().includes("shaobkj")) {
+        console.log("[Shaobkj Debug] Node matched by title:", title);
         return true;
     }
+    
+    // Debug: Log what types we're checking against
+    if (t && !SHAOBKJ_NODE_TYPES.includes(t) && !DYNAMIC_NODES.includes(t)) {
+        console.log("[Shaobkj Debug] Node NOT matched:", t, "SHAOBKJ_NODE_TYPES:", SHAOBKJ_NODE_TYPES, "DYNAMIC_NODES:", DYNAMIC_NODES);
+    }
+    
     return false;
 }
 
@@ -174,6 +185,49 @@ function installShaobkjTitleColorHook() {
         return true;
     }
     return false;
+}
+
+let shaobkjTooltipHookInstalled = false;
+function installShaobkjTooltipHook() {
+    // Always try to install/update the hook on the active canvas instance
+    const canvas = app.canvas || (globalThis.LGraphCanvas && globalThis.LGraphCanvas.active_canvas);
+    if (!canvas) return;
+
+    // Avoid double wrapping the SAME instance
+    if (canvas.__shaobkj_hook_active) return;
+    
+    const originalShowTooltip = canvas.showTooltip;
+
+    // Hook ShowTooltip: Reposition tooltips for Shaobkj nodes to avoid blocking controls
+    canvas.showTooltip = function(text, x, y) {
+        // If we are over a Shaobkj node, reposition the tooltip to avoid blocking controls
+        if (this.node_over && isShaobkjRuntimeNode(this.node_over)) {
+            // Force use of Mouse Coordinates (this.last_mouse) if available
+            // This overrides LiteGraph's default calculation which might place it to the right
+            let targetX = x;
+            let targetY = y;
+
+            if (this.last_mouse) {
+                targetX = this.last_mouse[0];
+                targetY = this.last_mouse[1];
+            }
+
+            // Shift Y down by 30px to appear below the cursor
+            // This prevents blocking the current widget's input area
+            const finalX = targetX;
+            const finalY = targetY + 30;
+            
+            // console.log("[Shaobkj Tooltip] Repositioned to below mouse: ", finalX, finalY);
+            return originalShowTooltip.call(this, text, finalX, finalY);
+        }
+        
+        // Otherwise, use original position
+        return originalShowTooltip.apply(this, arguments);
+    };
+
+    canvas.__shaobkj_hook_active = true;
+    shaobkjTooltipHookInstalled = true;
+    console.log("[Shaobkj] Tooltip hook installed on active canvas");
 }
 
 function manageInputs(node, onlyAdd = false) {
@@ -289,6 +343,23 @@ function manageInputs(node, onlyAdd = false) {
     }
 }
 
+function cleanupDynamicInputs(node) {
+    if (!node.inputs || !Array.isArray(node.inputs) || !node.inputs.length) return;
+    let changed = false;
+    // Iterate backwards to safely remove
+    for (let i = node.inputs.length - 1; i >= 0; i--) {
+        const n = node.inputs[i]?.name || "";
+        if (n.startsWith("image_") || n.startsWith("video_")) {
+            node.removeInput(i);
+            changed = true;
+        }
+    }
+    if (changed) {
+        node.onResize?.(node.size);
+        node.setDirtyCanvas(true, true);
+    }
+}
+
 function setupLinkWidget(node) {
     if (!node.widgets) return;
     const index = node.widgets.findIndex(w => w.name === "API申请地址");
@@ -303,7 +374,7 @@ function setupLinkWidget(node) {
     const urlValue = typeof widget.value === "string" ? widget.value.trim() : "";
     const url = urlValue && (urlValue.startsWith("http://") || urlValue.startsWith("https://")) ? urlValue : defaultUrl;
     node.widgets.splice(index, 1);
-    const newWidget = node.addWidget("button", "API申请地址", null, () => {
+    const newWidget = node.addWidget("button", "API申请地址", "Open URL", () => {
         window.open(url, "_blank");
     });
 
@@ -467,6 +538,7 @@ app.registerExtension({
 
         started = true;
         const ensureTitleHook = () => {
+            installShaobkjTooltipHook();
             if (!installShaobkjTitleColorHook()) {
                 requestAnimationFrame(ensureTitleHook);
             }
@@ -488,19 +560,8 @@ app.registerExtension({
                     syncSeedControl(node);
                     if (shouldManageDynamicInputsByNode(node)) {
                         manageInputs(node);
-                    } else if (node.inputs && Array.isArray(node.inputs) && node.inputs.length) {
-                        let changed = false;
-                        for (let i = node.inputs.length - 1; i >= 0; i--) {
-                            const n = node.inputs[i]?.name || "";
-                            if (n.startsWith("image_") || n.startsWith("video_")) {
-                                node.removeInput(i);
-                                changed = true;
-                            }
-                        }
-                        if (changed) {
-                            node.onResize?.(node.size);
-                            node.setDirtyCanvas(true, true);
-                        }
+                    } else {
+                        cleanupDynamicInputs(node);
                     }
                 }
             }
@@ -539,7 +600,11 @@ app.registerExtension({
                 
                 // Run manageInputs immediately to ensure slots exist for link restoration
                 // Use onlyAdd=true to prevent removing slots during initial load
-                if (needsDynamicInputs) manageInputs(this, true);
+                if (needsDynamicInputs) {
+                    manageInputs(this, true);
+                } else {
+                    cleanupDynamicInputs(this);
+                }
 
                 setTimeout(() => {
                     setupNodeStyle(this);
@@ -548,7 +613,11 @@ app.registerExtension({
                     setupUploadButtonLabel(this);
                     syncSeedControl(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
-                    if (needsDynamicInputs) manageInputs(this, true);
+                    if (needsDynamicInputs) {
+                        manageInputs(this, true);
+                    } else {
+                        cleanupDynamicInputs(this);
+                    }
                 }, 50);
                 
                 return r;
@@ -558,9 +627,13 @@ app.registerExtension({
             nodeType.prototype.onConnectionsChange = function (type, index, connected, link_info, slot) {
                 const r = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
                 
-                if (needsDynamicInputs && type === 1) {
+                if (type === 1) {
                     setTimeout(() => {
-                        manageInputs(this);
+                        if (needsDynamicInputs) {
+                            manageInputs(this);
+                        } else {
+                            cleanupDynamicInputs(this);
+                        }
                     }, 50);
                 }
                 
@@ -571,11 +644,13 @@ app.registerExtension({
             nodeType.prototype.onConfigure = function() {
                 const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
                 
-                if (needsDynamicInputs) {
-                    setTimeout(() => {
+                setTimeout(() => {
+                    if (needsDynamicInputs) {
                         manageInputs(this);
-                    }, 50);
-                }
+                    } else {
+                        cleanupDynamicInputs(this);
+                    }
+                }, 50);
                 
                 return r;
             }
