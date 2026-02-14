@@ -291,6 +291,9 @@ def run_concurrent_task_internal(data):
         if target_aspect_ratio != "原图1比例" and target_aspect_ratio != "Free":
             payload["generationConfig"]["imageConfig"]["aspectRatio"] = str(target_aspect_ratio)
 
+        # Debug: Print Image Config to verify Aspect Ratio
+        print(f"[ComfyUI-shaobkj] [Debug] Sending Image Config: {payload.get('generationConfig', {}).get('imageConfig', {})}")
+
         # Send Request
         disable_insecure_request_warnings()
         session, proxies = create_requests_session(bool(use_proxy))
