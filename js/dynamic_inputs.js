@@ -361,16 +361,44 @@ function cleanupDynamicInputs(node) {
 }
 
 function setupLinkWidget(node) {
-    if (!node.widgets) return;
+    if (!node.widgets) {
+        node.widgets = [];
+    }
     const index = node.widgets.findIndex(w => w.name === "API申请地址");
-    if (index === -1) return;
+    const defaultUrl = "https://yhmx.work/login?expired=true";
 
+    // Case 1: Not found - Add it
+    if (index === -1) {
+        const newWidget = node.addWidget("button", "API申请地址", "Open URL", () => {
+            window.open(defaultUrl, "_blank");
+        });
+        newWidget.name = "API申请地址";
+        newWidget.label = "🔗 打开 API 申请地址";
+        newWidget.tooltip = "打开 API 申请页面";
+        newWidget.serialize = false;
+        node.setDirtyCanvas(true, true);
+        return true;
+    }
+
+    // Case 2: Found - Check properties and position
     const widget = node.widgets[index];
-    if (widget.type === "button" && widget.label === "🔗 打开 API 申请地址" && widget.callback) {
+    const isLast = index === node.widgets.length - 1;
+    const isCorrect = widget.type === "button" && widget.label === "🔗 打开 API 申请地址" && widget.callback;
+
+    // If correct and at the bottom, do nothing
+    if (isCorrect && isLast) {
         return false;
     }
 
-    const defaultUrl = "https://yhmx.work/login?expired=true";
+    // If correct but not at bottom, move to end
+    if (isCorrect && !isLast) {
+        node.widgets.splice(index, 1);
+        node.widgets.push(widget);
+        node.setDirtyCanvas(true, true);
+        return true;
+    }
+
+    // Case 3: Incorrect properties - Replace and ensure at bottom
     const urlValue = typeof widget.value === "string" ? widget.value.trim() : "";
     const url = urlValue && (urlValue.startsWith("http://") || urlValue.startsWith("https://")) ? urlValue : defaultUrl;
     node.widgets.splice(index, 1);
@@ -382,12 +410,6 @@ function setupLinkWidget(node) {
     newWidget.label = "🔗 打开 API 申请地址";
     newWidget.tooltip = "打开 API 申请页面";
     newWidget.serialize = false;
-
-    const lastIndex = node.widgets.length - 1;
-    if (lastIndex !== index) {
-        node.widgets.splice(lastIndex, 1);
-        node.widgets.splice(index, 0, newWidget);
-    }
 
     node.setDirtyCanvas(true, true);
     return true;
