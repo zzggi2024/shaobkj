@@ -77,6 +77,7 @@ class Shaobkj_APINode:
                 "模型选择": (
                     [
                         "gemini-3-pro-image-preview",
+                        "gemini-3.1-flash-image-preview",
                         "智能加载",
                     ],
                     {"default": "gemini-3-pro-image-preview", "tooltip": "模型选择或智能加载；推荐：gemini-3-pro-image-preview"},
@@ -1116,6 +1117,7 @@ class Shaobkj_APINode_Batch:
                 "模型选择": (
                     [
                         "gemini-3-pro-image-preview",
+                        "gemini-3.1-flash-image-preview",
                         "智能加载",
                     ],
                     {"default": "gemini-3-pro-image-preview", "tooltip": "模型选择或智能加载；推荐：gemini-3-pro-image-preview"},
