@@ -88,7 +88,7 @@ def run_concurrent_task_internal(data):
 
     try:
         # Parse common params
-        api_key = str(data.get("api_key", "")).strip()
+        api_key = data.get("api_key")
         api_url_base = data.get("api_url", "https://yhmx.work")
         model = data.get("model", "gemini-3-pro-image-preview")
         use_proxy = data.get("use_proxy", False)
@@ -241,12 +241,8 @@ def run_concurrent_task_internal(data):
         api_origin = urlparse(base_origin).netloc
         
         url = f"{base_origin}/v1beta/models/{model}:generateContent"
-        # Fix: Add Authorization header for proxies that require it (e.g. yhmx.work)
-        headers = {
-            "Content-Type": "application/json", 
-            "x-goog-api-key": api_key,
-            "Authorization": f"Bearer {api_key}"
-        }
+        # Fix: Remove Authorization header for Gemini to improve proxy compatibility (align with ModeHub)
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
         # Force generation instruction
         final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
@@ -740,7 +736,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     CATEGORY = "🤖shaobkj-APIbox"
     OUTPUT_NODE = True
 
-    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 主体文本, 输入图像_长边设置, seed, Batch拆分模式, Batch对齐方式, 保存路径, 保存格式, 最大并发数, 并发间隔, **kwargs):
+    def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 主体文本, 保存路径, seed, **kwargs):
         # Unwrap parameters because INPUT_IS_LIST = True wraps everything in lists
         # We assume common parameters are same for all items (take first), OR we should support batching them too.
         # For simplicity, let's take the first item for "global" settings, but support batching for Prompts and Images.
@@ -750,7 +746,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 return v[0]
             return v
         
-        api_key_val = str(get_val(API密钥)).strip()
+        api_key_val = get_val(API密钥)
         api_url_val = get_val(API地址)
         model_val = get_val(模型选择)
         use_proxy_val = get_val(使用系统代理)
@@ -769,14 +765,14 @@ class Shaobkj_ConcurrentImageEdit_Sender:
             if k == "unique_id": continue
             clean_kwargs[k] = v
 
-        long_side_val = int(get_val(输入图像_长边设置, 1280))
+        long_side_val = int(get_val(kwargs.get("输入图像-长边设置", [1280])))
         wait_time_val = 0 # Default to infinite wait
         seed_val = int(get_val(seed))
-        batch_split_val = get_val(Batch拆分模式, True)
-        batch_align_val = get_val(Batch对齐方式, "循环补全(Max)")
-        submit_interval_val = float(get_val(并发间隔, 1.0))
-        max_workers_val = int(get_val(最大并发数, 5))
-        save_format_val = get_val(保存格式, "JPEG (默认95%)")
+        batch_split_val = get_val(kwargs.get("Batch拆分模式", [True]))
+        batch_align_val = get_val(kwargs.get("Batch对齐方式", ["循环补全(Max)"]))
+        submit_interval_val = float(get_val(kwargs.get("并发间隔", [1.0])))
+        max_workers_val = int(get_val(kwargs.get("最大并发数", [5])))
+        save_format_val = get_val(kwargs.get("保存格式", ["JPEG (默认95%)"]))
         filename_source_val = kwargs.get("文件名来源", None) # Keep as list
         
         # 0. Pre-check

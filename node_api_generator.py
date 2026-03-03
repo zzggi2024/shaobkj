@@ -133,7 +133,7 @@ class Shaobkj_APINode:
         return closest_str
 
     def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 接收模式, 主体文本, 保存格式, 等待时间, seed, **kwargs):
-        api_key = str(API密钥).strip()
+        api_key = API密钥
         base_origin = str(API地址).rstrip("/")
         gemini_base = base_origin[:-3] if base_origin.endswith("/v1") else base_origin
         api_origin = urlparse(gemini_base).netloc
@@ -163,13 +163,7 @@ class Shaobkj_APINode:
                 model = "gemini-3-pro-image-preview"
 
         # Fix: Remove Authorization header for Gemini to improve proxy compatibility (align with ModeHub)
-        # However, for some proxies like yhmx.work, Authorization is required.
-        # So we add both. Google API ignores Authorization if x-goog-api-key is present.
-        headers = {
-            "Content-Type": "application/json", 
-            "x-goog-api-key": api_key,
-            "Authorization": f"Bearer {api_key}"
-        }
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
 
         url = f"{gemini_base}/v1beta/models/{model}:generateContent"
 

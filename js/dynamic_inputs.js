@@ -547,6 +547,32 @@ function syncSeedControl(node) {
     return changed;
 }
 
+function sanitizeNumericWidgets(node) {
+    if (!node.widgets) return false;
+    let changed = false;
+    for (const w of node.widgets) {
+        const type = typeof w.type === "string" ? w.type : "";
+        const isNumberWidget = type === "number" || type === "slider";
+        const raw = w.value;
+        const num = typeof raw === "number" ? raw : (typeof raw === "string" && raw.trim() ? Number(raw) : NaN);
+        const isNaNValue = Number.isNaN(num) || !Number.isFinite(num);
+        const isForceNumeric = w.name === "并发间隔";
+        if ((isNumberWidget || isForceNumeric) && isNaNValue) {
+            const opts = w.options || {};
+            let next = opts.default;
+            if (next === undefined && isForceNumeric) next = 1.0;
+            if (next === undefined) next = opts.min;
+            if (next === undefined) next = 0;
+            w.value = next;
+            changed = true;
+        }
+    }
+    if (changed) {
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
+}
+
 app.registerExtension({
     name: "Shaobkj.DynamicInputs",
     async setup(app) {
@@ -580,6 +606,7 @@ app.registerExtension({
                     setupLongSideWidget(node);
                     setupUploadButtonLabel(node);
                     syncSeedControl(node);
+                    sanitizeNumericWidgets(node);
                     if (shouldManageDynamicInputsByNode(node)) {
                         manageInputs(node);
                     } else {
@@ -634,6 +661,7 @@ app.registerExtension({
                     setupLongSideWidget(this);
                     setupUploadButtonLabel(this);
                     syncSeedControl(this);
+                    sanitizeNumericWidgets(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
                     if (needsDynamicInputs) {
                         manageInputs(this, true);
