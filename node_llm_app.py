@@ -54,7 +54,7 @@ class Shaobkj_LLM_App:
         return self._execute_llm(API密钥, API地址, 模型选择, 使用系统代理, 系统指令, 用户输入, 思考模式, 思考预算, temperature, topP, 输入图像_长边设置, 等待时间, seed, **kwargs)
 
     def _execute_llm(self, API密钥, API地址, 模型选择, 使用系统代理, 系统指令, 用户输入, 思考模式, 思考预算, temperature, topP, 输入图像_长边设置, 等待时间, seed, **kwargs):
-        api_key = API密钥
+        api_key = str(API密钥).strip()
         if not api_key:
             raise ValueError("API Key is required.")
 
@@ -133,7 +133,11 @@ class Shaobkj_LLM_App:
                 "thinkingBudget": 思考预算
             }
 
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+        headers = {
+            "Content-Type": "application/json", 
+            "x-goog-api-key": api_key,
+            "Authorization": f"Bearer {api_key}"
+        }
         
         try:
             response = post_json_with_retry(

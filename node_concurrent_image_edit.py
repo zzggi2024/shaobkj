@@ -88,7 +88,7 @@ def run_concurrent_task_internal(data):
 
     try:
         # Parse common params
-        api_key = data.get("api_key")
+        api_key = str(data.get("api_key", "")).strip()
         api_url_base = data.get("api_url", "https://yhmx.work")
         model = data.get("model", "gemini-3-pro-image-preview")
         use_proxy = data.get("use_proxy", False)
@@ -241,8 +241,12 @@ def run_concurrent_task_internal(data):
         api_origin = urlparse(base_origin).netloc
         
         url = f"{base_origin}/v1beta/models/{model}:generateContent"
-        # Fix: Remove Authorization header for Gemini to improve proxy compatibility (align with ModeHub)
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+        # Fix: Add Authorization header for proxies that require it (e.g. yhmx.work)
+        headers = {
+            "Content-Type": "application/json", 
+            "x-goog-api-key": api_key,
+            "Authorization": f"Bearer {api_key}"
+        }
         
         # Force generation instruction
         final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
@@ -746,7 +750,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 return v[0]
             return v
         
-        api_key_val = get_val(API密钥)
+        api_key_val = str(get_val(API密钥)).strip()
         api_url_val = get_val(API地址)
         model_val = get_val(模型选择)
         use_proxy_val = get_val(使用系统代理)
