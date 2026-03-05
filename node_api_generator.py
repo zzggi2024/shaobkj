@@ -734,7 +734,7 @@ def run_batch_generation_task(data):
         api_origin = urlparse(base_origin).netloc
         
         url = f"{base_origin}/v1beta/models/{model}:generateContent"
-        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key, "Authorization": f"Bearer {api_key}"}
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
         # Force generation instruction
         final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
