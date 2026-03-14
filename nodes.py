@@ -5,6 +5,7 @@ from .node_concurrent_image_edit import Shaobkj_ConcurrentImageEdit_Sender, Shao
 from .node_llm_app import Shaobkj_LLM_App, Shaobkj_NanoBanana_Prompt
 from .node_loop import Shaobkj_ForLoop_Start, Shaobkj_ForLoop_End
 from .node_load_image_list import Shaobkj_LoadImageListFromDir
+from .node_resolution_judge import Shaobkj_ResolutionJudge
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
@@ -21,6 +22,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_ForLoop_End": Shaobkj_ForLoop_End,
     "Shaobkj_NanoBanana_Prompt": Shaobkj_NanoBanana_Prompt,
     "Shaobkj_LoadImageListFromDir": Shaobkj_LoadImageListFromDir,
+    "Shaobkj_ResolutionJudge": Shaobkj_ResolutionJudge,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -38,6 +40,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ForLoop_End": "🤖循环结束",
     "Shaobkj_NanoBanana_Prompt": "🤖香蕉专属提示词",
     "Shaobkj_LoadImageListFromDir": "🤖加载图像列表(路径)",
+    "Shaobkj_ResolutionJudge": "🤖分辨率智能判断",
 }
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")
