@@ -26,6 +26,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Load_Batch_Images",
     "Shaobkj_Image_Save",
     "Shaobkj_Fixed_Seed",
+    "Shaobkj_LoadImageListFromDir",
 ];
 const MIN_INPUTS = 2;
 let started = false;
@@ -141,6 +142,56 @@ function isShaobkjLoadImageNode(node) {
     const t = node?.type;
     const title = node?.title;
     return t === "Shaobkj_Load_Image_Path" || title === "🤖加载图像";
+}
+
+function isShaobkjLoadImageListNode(node) {
+    const t = node?.type;
+    const title = node?.title;
+    return t === "Shaobkj_LoadImageListFromDir" || title === "🤖加载图像列表(路径)";
+}
+
+function setupLoadImageListLocalization(node) {
+    if (!isShaobkjLoadImageListNode(node) || !node.widgets) return false;
+    let changed = false;
+    const labelMap = {
+        directory: "目录路径",
+        image_load_cap: "加载数量上限",
+        start_index: "起始索引",
+        load_always: "每次重载",
+        sort_method: "排序方式",
+        include_subdirs: "包含子文件夹",
+    };
+    const sortValueMap = {
+        numerical: "数字顺序",
+        alphabetical: "字母顺序",
+        date: "修改时间",
+    };
+    for (const w of node.widgets) {
+        const name = typeof w.name === "string" ? w.name : "";
+        const nextLabel = labelMap[name];
+        if (nextLabel && w.label !== nextLabel) {
+            w.label = nextLabel;
+            changed = true;
+        }
+        if (name === "sort_method" && w.options && Array.isArray(w.options.values)) {
+            const nextValues = ["数字顺序", "字母顺序", "修改时间"];
+            const current = String(w.value ?? "");
+            const mapped = sortValueMap[current] || current;
+            const sameValues = w.options.values.length === nextValues.length && w.options.values.every((v, i) => v === nextValues[i]);
+            if (!sameValues) {
+                w.options.values = nextValues;
+                changed = true;
+            }
+            if (nextValues.includes(mapped) && w.value !== mapped) {
+                w.value = mapped;
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
 }
 
 let shaobkjTitleHookInstalled = false;
@@ -605,6 +656,7 @@ app.registerExtension({
                     setupLinkWidget(node);
                     setupLongSideWidget(node);
                     setupUploadButtonLabel(node);
+                    setupLoadImageListLocalization(node);
                     syncSeedControl(node);
                     sanitizeNumericWidgets(node);
                     if (shouldManageDynamicInputsByNode(node)) {
@@ -660,6 +712,7 @@ app.registerExtension({
                     setupLinkWidget(this);
                     setupLongSideWidget(this);
                     setupUploadButtonLabel(this);
+                    setupLoadImageListLocalization(this);
                     syncSeedControl(this);
                     sanitizeNumericWidgets(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
