@@ -99,6 +99,37 @@ def _extract_text(result):
     return str(result)
 
 
+def _normalize_florence_model_bundle(bundle):
+    if isinstance(bundle, dict):
+        if bundle.get("model") is not None and bundle.get("processor") is not None:
+            return bundle
+        if "florence2_model" in bundle:
+            normalized = _normalize_florence_model_bundle(bundle.get("florence2_model"))
+            if normalized is not None:
+                return normalized
+        for v in bundle.values():
+            normalized = _normalize_florence_model_bundle(v)
+            if normalized is not None:
+                return normalized
+        return None
+    if isinstance(bundle, (list, tuple)):
+        for item in bundle:
+            normalized = _normalize_florence_model_bundle(item)
+            if normalized is not None:
+                return normalized
+        return None
+    if hasattr(bundle, "model") and hasattr(bundle, "processor"):
+        return {
+            "model": getattr(bundle, "model"),
+            "processor": getattr(bundle, "processor"),
+            "version": getattr(bundle, "version", None),
+            "device": getattr(bundle, "device", None),
+            "dtype": getattr(bundle, "dtype", None),
+            "attn": getattr(bundle, "attn", None),
+        }
+    return None
+
+
 def _load_florence_model(version):
     try:
         from transformers.dynamic_module_utils import get_imports as original_get_imports
@@ -235,8 +266,9 @@ def _load_florence_model(version):
 
 
 def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_beams, do_sample):
-    if not isinstance(model_bundle, dict):
-        raise RuntimeError("Florence2模型对象无效，请重新连接‘🤖加载Florence2模型(急速)’输出。")
+    model_bundle = _normalize_florence_model_bundle(model_bundle)
+    if model_bundle is None:
+        raise RuntimeError("Florence2模型对象无效，请连接‘图层遮罩：加载Florence2模型（高级）’输出。")
 
     task_token = TASK_TOKEN_MAP.get(task, "<MORE_DETAILED_CAPTION>")
     prompt = task_token if not text_input else f"{task_token}{text_input}"
@@ -296,32 +328,6 @@ def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_bea
         return generated_text
 
 
-class Shaobkj_Load_Florence2_Model:
-    def __init__(self):
-        self.model_bundle = None
-        self.version = None
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        model_list = list(FL2_MODEL_REPOS.keys())
-        return {
-            "required": {
-                "模型版本": (model_list, {"default": "large-PromptGen-v2.0"}),
-            },
-        }
-
-    RETURN_TYPES = ("FLORENCE2",)
-    RETURN_NAMES = ("Florence2模型",)
-    FUNCTION = "load"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
-
-    def load(self, 模型版本):
-        if self.model_bundle is None or self.version != 模型版本:
-            self.model_bundle = _load_florence_model(模型版本)
-            self.version = 模型版本
-        return (self.model_bundle,)
-
-
 class Shaobkj_Florence2_Fast_Prompt:
     def __init__(self):
         pass
@@ -365,11 +371,9 @@ class Shaobkj_Florence2_Fast_Prompt:
 
 
 NODE_CLASS_MAPPINGS = {
-    "Shaobkj_Load_Florence2_Model": Shaobkj_Load_Florence2_Model,
     "Shaobkj_Florence2_Fast_Prompt": Shaobkj_Florence2_Fast_Prompt,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Shaobkj_Load_Florence2_Model": "🤖加载Florence2模型(急速)",
     "Shaobkj_Florence2_Fast_Prompt": "🤖图像急速反推",
 }
