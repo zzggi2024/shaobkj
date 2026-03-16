@@ -10,6 +10,7 @@ class Shaobkj_ResolutionJudge:
                 "图像": ("IMAGE", {"tooltip": "输入待判断图像；推荐：连接图像输出"}),
                 "阈值": ("INT", {"default": 1024, "min": 1, "max": 32768, "step": 1, "tooltip": "手动输入长边阈值像素；推荐：1024"}),
                 "阈值缩放边": (["长边", "短边"], {"default": "长边", "tooltip": "按长边或短边等比缩放到阈值"}),
+                "保持原图": (["关闭", "打开"], {"default": "关闭", "tooltip": "打开时，未超出阈值仅做取整不缩放"}),
                 "取整倍数": (["8", "16", "32", "64"], {"default": "8", "tooltip": "输出宽高需被该值整除；推荐：8"}),
                 "取整模式": (["向上", "向下"], {"default": "向上", "tooltip": "尺寸对齐到倍数时的取整方向；推荐：向上"}),
             },
@@ -23,7 +24,7 @@ class Shaobkj_ResolutionJudge:
     FUNCTION = "judge_resolution"
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
 
-    def judge_resolution(self, 图像, 阈值, 阈值缩放边, 取整倍数, 取整模式, 遮罩=None):
+    def judge_resolution(self, 图像, 阈值, 阈值缩放边, 保持原图, 取整倍数, 取整模式, 遮罩=None):
         if not isinstance(图像, torch.Tensor):
             raise ValueError("❌ 错误：输入图像类型无效")
 
@@ -45,21 +46,26 @@ class Shaobkj_ResolutionJudge:
         use_short_edge = str(阈值缩放边) == "短边"
         reference_edge = min(w, h) if use_short_edge else max(w, h)
         exceeded = bool(reference_edge > threshold_px)
+        keep_original = str(保持原图) == "打开"
 
-        if use_short_edge:
-            if w <= h:
-                new_w = threshold_px
-                new_h = max(1, int(round(h * threshold_px / w)))
-            else:
-                new_h = threshold_px
-                new_w = max(1, int(round(w * threshold_px / h)))
+        if keep_original and not exceeded:
+            new_w = w
+            new_h = h
         else:
-            if w >= h:
-                new_w = threshold_px
-                new_h = max(1, int(round(h * threshold_px / w)))
+            if use_short_edge:
+                if w <= h:
+                    new_w = threshold_px
+                    new_h = max(1, int(round(h * threshold_px / w)))
+                else:
+                    new_h = threshold_px
+                    new_w = max(1, int(round(w * threshold_px / h)))
             else:
-                new_h = threshold_px
-                new_w = max(1, int(round(w * threshold_px / h)))
+                if w >= h:
+                    new_w = threshold_px
+                    new_h = max(1, int(round(h * threshold_px / w)))
+                else:
+                    new_h = threshold_px
+                    new_w = max(1, int(round(w * threshold_px / h)))
 
         def align_size(value, m, mode):
             if mode == "向下":
