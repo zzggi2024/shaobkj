@@ -148,6 +148,21 @@ def _load_florence_model(version):
         except Exception:
             pass
 
+    runtime_config_py = os.path.join(model_path, "configuration_florence2.py")
+    if os.path.exists(runtime_config_py):
+        try:
+            with open(runtime_config_py, "r", encoding="utf-8") as f:
+                runtime_code = f.read()
+            patched_code = runtime_code.replace(
+                "if self.forced_bos_token_id is None and kwargs.get(\"force_bos_token_to_be_generated\", False):",
+                "if getattr(self, \"forced_bos_token_id\", None) is None and kwargs.get(\"force_bos_token_to_be_generated\", False):",
+            )
+            if patched_code != runtime_code:
+                with open(runtime_config_py, "w", encoding="utf-8") as f:
+                    f.write(patched_code)
+        except Exception:
+            pass
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     last_error = None
 
