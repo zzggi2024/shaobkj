@@ -138,6 +138,42 @@ def _normalize_florence_model_bundle(bundle):
     return None
 
 
+def _contains_meta_tensors(model):
+    try:
+        for p in model.parameters():
+            if getattr(p, "is_meta", False):
+                return True
+    except Exception:
+        return False
+    try:
+        for b in model.buffers():
+            if getattr(b, "is_meta", False):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _apply_config_compat(model):
+    if not hasattr(model.config, "forced_bos_token_id"):
+        setattr(model.config, "forced_bos_token_id", getattr(model.config, "bos_token_id", None))
+    if not hasattr(model.config, "forced_eos_token_id"):
+        setattr(model.config, "forced_eos_token_id", getattr(model.config, "eos_token_id", None))
+    if hasattr(model.config, "text_config") and model.config.text_config is not None:
+        if not hasattr(model.config.text_config, "forced_bos_token_id"):
+            setattr(
+                model.config.text_config,
+                "forced_bos_token_id",
+                getattr(model.config.text_config, "bos_token_id", None),
+            )
+        if not hasattr(model.config.text_config, "forced_eos_token_id"):
+            setattr(
+                model.config.text_config,
+                "forced_eos_token_id",
+                getattr(model.config.text_config, "eos_token_id", None),
+            )
+
+
 def _load_florence_model(version):
     try:
         from transformers.dynamic_module_utils import get_imports as original_get_imports
@@ -220,48 +256,21 @@ def _load_florence_model(version):
                     model = AutoModelForCausalLM.from_pretrained(
                         model_path,
                         trust_remote_code=True,
+                        device_map=device.type,
                         torch_dtype=dtype,
-                        low_cpu_mem_usage=False,
+                        low_cpu_mem_usage=True,
                         attn_implementation=attn,
                     )
                 processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-                try:
-                    model = model.to(device)
-                except Exception as move_error:
-                    if "meta tensor" not in str(move_error).lower():
-                        raise
-                    with patch("transformers.dynamic_module_utils.get_imports", safe_get_imports):
-                        model = AutoModelForCausalLM.from_pretrained(
-                            model_path,
-                            trust_remote_code=True,
-                            torch_dtype=dtype,
-                            low_cpu_mem_usage=False,
-                            attn_implementation=attn,
-                        )
-                    model = model.to(device)
-                if not hasattr(model.config, "forced_bos_token_id"):
-                    setattr(model.config, "forced_bos_token_id", getattr(model.config, "bos_token_id", None))
-                if not hasattr(model.config, "forced_eos_token_id"):
-                    setattr(model.config, "forced_eos_token_id", getattr(model.config, "eos_token_id", None))
-                if hasattr(model.config, "text_config") and model.config.text_config is not None:
-                    if not hasattr(model.config.text_config, "forced_bos_token_id"):
-                        setattr(
-                            model.config.text_config,
-                            "forced_bos_token_id",
-                            getattr(model.config.text_config, "bos_token_id", None),
-                        )
-                    if not hasattr(model.config.text_config, "forced_eos_token_id"):
-                        setattr(
-                            model.config.text_config,
-                            "forced_eos_token_id",
-                            getattr(model.config.text_config, "eos_token_id", None),
-                        )
+                if _contains_meta_tensors(model):
+                    raise RuntimeError("meta tensor detected after from_pretrained")
+                _apply_config_compat(model)
                 model.eval()
                 return {
                     "model": model,
                     "processor": processor,
                     "version": version,
-                    "device": device,
+                    "device": torch.device(device.type),
                     "dtype": dtype,
                     "attn": attn,
                 }
@@ -270,7 +279,40 @@ def _load_florence_model(version):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-    raise RuntimeError(f"加载 Florence2 模型失败: {last_error}")
+    try:
+        with patch("transformers.dynamic_module_utils.get_imports", safe_get_imports):
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    trust_remote_code=True,
+                    device_map="cpu",
+                    torch_dtype=torch.float32,
+                    low_cpu_mem_usage=False,
+                    attn_implementation="eager",
+                )
+            except TypeError:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    trust_remote_code=True,
+                    device_map="cpu",
+                    torch_dtype=torch.float32,
+                    low_cpu_mem_usage=False,
+                )
+        processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+        if _contains_meta_tensors(model):
+            raise RuntimeError("CPU fallback still contains meta tensors")
+        _apply_config_compat(model)
+        model.eval()
+        return {
+            "model": model,
+            "processor": processor,
+            "version": version,
+            "device": torch.device("cpu"),
+            "dtype": torch.float32,
+            "attn": "eager",
+        }
+    except Exception as cpu_error:
+        raise RuntimeError(f"加载 Florence2 模型失败: {last_error}; CPU兜底失败: {cpu_error}") from cpu_error
 
 
 def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_beams, do_sample):
@@ -299,6 +341,11 @@ def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_bea
     if device is None:
         try:
             device = next(model.parameters()).device
+        except Exception:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    elif not isinstance(device, torch.device):
+        try:
+            device = torch.device(str(device))
         except Exception:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
