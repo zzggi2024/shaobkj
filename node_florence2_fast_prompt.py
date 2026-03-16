@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from unittest.mock import patch
 
 import folder_paths
@@ -120,6 +121,33 @@ def _load_florence_model(version):
             ignore_patterns=["*.md", "*.txt"],
         )
 
+    config_path = os.path.join(model_path, "config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            changed = False
+            if isinstance(cfg, dict):
+                text_cfg = cfg.get("text_config")
+                if isinstance(text_cfg, dict):
+                    if "forced_bos_token_id" not in text_cfg:
+                        text_cfg["forced_bos_token_id"] = text_cfg.get("bos_token_id")
+                        changed = True
+                    if "forced_eos_token_id" not in text_cfg and "eos_token_id" in text_cfg:
+                        text_cfg["forced_eos_token_id"] = text_cfg.get("eos_token_id")
+                        changed = True
+                if "forced_bos_token_id" not in cfg and isinstance(text_cfg, dict):
+                    cfg["forced_bos_token_id"] = text_cfg.get("forced_bos_token_id")
+                    changed = True
+                if "forced_eos_token_id" not in cfg and isinstance(text_cfg, dict) and "forced_eos_token_id" in text_cfg:
+                    cfg["forced_eos_token_id"] = text_cfg.get("forced_eos_token_id")
+                    changed = True
+            if changed:
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     last_error = None
 
@@ -144,6 +172,23 @@ def _load_florence_model(version):
                     )
                 processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
                 model = model.to(device)
+                if not hasattr(model.config, "forced_bos_token_id"):
+                    setattr(model.config, "forced_bos_token_id", getattr(model.config, "bos_token_id", None))
+                if not hasattr(model.config, "forced_eos_token_id"):
+                    setattr(model.config, "forced_eos_token_id", getattr(model.config, "eos_token_id", None))
+                if hasattr(model.config, "text_config") and model.config.text_config is not None:
+                    if not hasattr(model.config.text_config, "forced_bos_token_id"):
+                        setattr(
+                            model.config.text_config,
+                            "forced_bos_token_id",
+                            getattr(model.config.text_config, "bos_token_id", None),
+                        )
+                    if not hasattr(model.config.text_config, "forced_eos_token_id"):
+                        setattr(
+                            model.config.text_config,
+                            "forced_eos_token_id",
+                            getattr(model.config.text_config, "eos_token_id", None),
+                        )
                 model.eval()
                 return {
                     "model": model,
