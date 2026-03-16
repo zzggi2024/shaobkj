@@ -182,14 +182,15 @@ def _load_florence_model(version):
                         model_path,
                         trust_remote_code=True,
                         torch_dtype=dtype,
-                        low_cpu_mem_usage=True,
+                        low_cpu_mem_usage=False,
                         attn_implementation=attn,
                     )
+                processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
                 try:
-                    has_meta_params = any(getattr(p, "is_meta", False) for p in model.parameters())
-                except Exception:
-                    has_meta_params = False
-                if has_meta_params:
+                    model = model.to(device)
+                except Exception as move_error:
+                    if "meta tensor" not in str(move_error).lower():
+                        raise
                     with patch("transformers.dynamic_module_utils.get_imports", safe_get_imports):
                         model = AutoModelForCausalLM.from_pretrained(
                             model_path,
@@ -198,8 +199,7 @@ def _load_florence_model(version):
                             low_cpu_mem_usage=False,
                             attn_implementation=attn,
                         )
-                processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-                model = model.to(device)
+                    model = model.to(device)
                 if not hasattr(model.config, "forced_bos_token_id"):
                     setattr(model.config, "forced_bos_token_id", getattr(model.config, "bos_token_id", None))
                 if not hasattr(model.config, "forced_eos_token_id"):
