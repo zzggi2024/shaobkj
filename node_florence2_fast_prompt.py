@@ -101,8 +101,16 @@ def _extract_text(result):
 
 def _normalize_florence_model_bundle(bundle):
     if isinstance(bundle, dict):
-        if bundle.get("model") is not None and bundle.get("processor") is not None:
-            return bundle
+        canonical_keys = {"model", "processor", "version", "device", "dtype", "attn"}
+        if any(k in bundle for k in canonical_keys):
+            return {
+                "model": bundle.get("model"),
+                "processor": bundle.get("processor"),
+                "version": bundle.get("version"),
+                "device": bundle.get("device"),
+                "dtype": bundle.get("dtype"),
+                "attn": bundle.get("attn"),
+            }
         if "florence2_model" in bundle:
             normalized = _normalize_florence_model_bundle(bundle.get("florence2_model"))
             if normalized is not None:
@@ -268,12 +276,22 @@ def _load_florence_model(version):
 def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_beams, do_sample):
     model_bundle = _normalize_florence_model_bundle(model_bundle)
     if model_bundle is None:
-        raise RuntimeError("Florence2模型对象无效，请连接‘图层遮罩：加载Florence2模型（高级）’输出。")
+        raise RuntimeError("Florence2模型对象无效，请连接 Florence2 加载模型节点输出。")
 
     task_token = TASK_TOKEN_MAP.get(task, "<MORE_DETAILED_CAPTION>")
     prompt = task_token if not text_input else f"{task_token}{text_input}"
     model = model_bundle.get("model")
     processor = model_bundle.get("processor")
+    if model is None or processor is None:
+        version = model_bundle.get("version")
+        if not isinstance(version, str) or version not in FL2_MODEL_REPOS:
+            version = "base"
+        try:
+            model_bundle = _load_florence_model(version)
+        except Exception as e:
+            raise RuntimeError(f"原节点模型未就绪，且兜底加载失败: {e}") from e
+        model = model_bundle.get("model")
+        processor = model_bundle.get("processor")
     if model is None or processor is None:
         raise RuntimeError("Florence2模型缺少 model/processor，请重新加载模型。")
 
