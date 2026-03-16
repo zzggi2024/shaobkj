@@ -3,3 +3,5 @@ Pillow
 pandas
 openpyxl
 yt-dlp
+transformers
+huggingface_hub
