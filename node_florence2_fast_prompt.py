@@ -99,81 +99,6 @@ def _extract_text(result):
     return str(result)
 
 
-def _normalize_florence_model_bundle(bundle):
-    if isinstance(bundle, dict):
-        canonical_keys = {"model", "processor", "version", "device", "dtype", "attn"}
-        if any(k in bundle for k in canonical_keys):
-            return {
-                "model": bundle.get("model"),
-                "processor": bundle.get("processor"),
-                "version": bundle.get("version"),
-                "device": bundle.get("device"),
-                "dtype": bundle.get("dtype"),
-                "attn": bundle.get("attn"),
-            }
-        if "florence2_model" in bundle:
-            normalized = _normalize_florence_model_bundle(bundle.get("florence2_model"))
-            if normalized is not None:
-                return normalized
-        for v in bundle.values():
-            normalized = _normalize_florence_model_bundle(v)
-            if normalized is not None:
-                return normalized
-        return None
-    if isinstance(bundle, (list, tuple)):
-        for item in bundle:
-            normalized = _normalize_florence_model_bundle(item)
-            if normalized is not None:
-                return normalized
-        return None
-    if hasattr(bundle, "model") and hasattr(bundle, "processor"):
-        return {
-            "model": getattr(bundle, "model"),
-            "processor": getattr(bundle, "processor"),
-            "version": getattr(bundle, "version", None),
-            "device": getattr(bundle, "device", None),
-            "dtype": getattr(bundle, "dtype", None),
-            "attn": getattr(bundle, "attn", None),
-        }
-    return None
-
-
-def _contains_meta_tensors(model):
-    try:
-        for p in model.parameters():
-            if getattr(p, "is_meta", False):
-                return True
-    except Exception:
-        return False
-    try:
-        for b in model.buffers():
-            if getattr(b, "is_meta", False):
-                return True
-    except Exception:
-        return False
-    return False
-
-
-def _apply_config_compat(model):
-    if not hasattr(model.config, "forced_bos_token_id"):
-        setattr(model.config, "forced_bos_token_id", getattr(model.config, "bos_token_id", None))
-    if not hasattr(model.config, "forced_eos_token_id"):
-        setattr(model.config, "forced_eos_token_id", getattr(model.config, "eos_token_id", None))
-    if hasattr(model.config, "text_config") and model.config.text_config is not None:
-        if not hasattr(model.config.text_config, "forced_bos_token_id"):
-            setattr(
-                model.config.text_config,
-                "forced_bos_token_id",
-                getattr(model.config.text_config, "bos_token_id", None),
-            )
-        if not hasattr(model.config.text_config, "forced_eos_token_id"):
-            setattr(
-                model.config.text_config,
-                "forced_eos_token_id",
-                getattr(model.config.text_config, "eos_token_id", None),
-            )
-
-
 def _load_florence_model(version):
     try:
         from transformers.dynamic_module_utils import get_imports as original_get_imports
@@ -223,21 +148,6 @@ def _load_florence_model(version):
         except Exception:
             pass
 
-    runtime_config_py = os.path.join(model_path, "configuration_florence2.py")
-    if os.path.exists(runtime_config_py):
-        try:
-            with open(runtime_config_py, "r", encoding="utf-8") as f:
-                runtime_code = f.read()
-            patched_code = runtime_code.replace(
-                "if self.forced_bos_token_id is None and kwargs.get(\"force_bos_token_to_be_generated\", False):",
-                "if getattr(self, \"forced_bos_token_id\", None) is None and kwargs.get(\"force_bos_token_to_be_generated\", False):",
-            )
-            if patched_code != runtime_code:
-                with open(runtime_config_py, "w", encoding="utf-8") as f:
-                    f.write(patched_code)
-        except Exception:
-            pass
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     last_error = None
 
@@ -256,21 +166,35 @@ def _load_florence_model(version):
                     model = AutoModelForCausalLM.from_pretrained(
                         model_path,
                         trust_remote_code=True,
-                        device_map=device.type,
                         torch_dtype=dtype,
                         low_cpu_mem_usage=True,
                         attn_implementation=attn,
                     )
                 processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-                if _contains_meta_tensors(model):
-                    raise RuntimeError("meta tensor detected after from_pretrained")
-                _apply_config_compat(model)
+                model = model.to(device)
+                if not hasattr(model.config, "forced_bos_token_id"):
+                    setattr(model.config, "forced_bos_token_id", getattr(model.config, "bos_token_id", None))
+                if not hasattr(model.config, "forced_eos_token_id"):
+                    setattr(model.config, "forced_eos_token_id", getattr(model.config, "eos_token_id", None))
+                if hasattr(model.config, "text_config") and model.config.text_config is not None:
+                    if not hasattr(model.config.text_config, "forced_bos_token_id"):
+                        setattr(
+                            model.config.text_config,
+                            "forced_bos_token_id",
+                            getattr(model.config.text_config, "bos_token_id", None),
+                        )
+                    if not hasattr(model.config.text_config, "forced_eos_token_id"):
+                        setattr(
+                            model.config.text_config,
+                            "forced_eos_token_id",
+                            getattr(model.config.text_config, "eos_token_id", None),
+                        )
                 model.eval()
                 return {
                     "model": model,
                     "processor": processor,
                     "version": version,
-                    "device": torch.device(device.type),
+                    "device": device,
                     "dtype": dtype,
                     "attn": attn,
                 }
@@ -279,61 +203,17 @@ def _load_florence_model(version):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-    try:
-        with patch("transformers.dynamic_module_utils.get_imports", safe_get_imports):
-            try:
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    trust_remote_code=True,
-                    device_map="cpu",
-                    torch_dtype=torch.float32,
-                    low_cpu_mem_usage=False,
-                    attn_implementation="eager",
-                )
-            except TypeError:
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    trust_remote_code=True,
-                    device_map="cpu",
-                    torch_dtype=torch.float32,
-                    low_cpu_mem_usage=False,
-                )
-        processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-        if _contains_meta_tensors(model):
-            raise RuntimeError("CPU fallback still contains meta tensors")
-        _apply_config_compat(model)
-        model.eval()
-        return {
-            "model": model,
-            "processor": processor,
-            "version": version,
-            "device": torch.device("cpu"),
-            "dtype": torch.float32,
-            "attn": "eager",
-        }
-    except Exception as cpu_error:
-        raise RuntimeError(f"加载 Florence2 模型失败: {last_error}; CPU兜底失败: {cpu_error}") from cpu_error
+    raise RuntimeError(f"加载 Florence2 模型失败: {last_error}")
 
 
 def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_beams, do_sample):
-    model_bundle = _normalize_florence_model_bundle(model_bundle)
-    if model_bundle is None:
-        raise RuntimeError("Florence2模型对象无效，请连接 Florence2 加载模型节点输出。")
+    if not isinstance(model_bundle, dict):
+        raise RuntimeError("Florence2模型对象无效，请重新连接‘🤖加载Florence2模型(急速)’输出。")
 
     task_token = TASK_TOKEN_MAP.get(task, "<MORE_DETAILED_CAPTION>")
     prompt = task_token if not text_input else f"{task_token}{text_input}"
     model = model_bundle.get("model")
     processor = model_bundle.get("processor")
-    if model is None or processor is None:
-        version = model_bundle.get("version")
-        if not isinstance(version, str) or version not in FL2_MODEL_REPOS:
-            version = "base"
-        try:
-            model_bundle = _load_florence_model(version)
-        except Exception as e:
-            raise RuntimeError(f"原节点模型未就绪，且兜底加载失败: {e}") from e
-        model = model_bundle.get("model")
-        processor = model_bundle.get("processor")
     if model is None or processor is None:
         raise RuntimeError("Florence2模型缺少 model/processor，请重新加载模型。")
 
@@ -341,11 +221,6 @@ def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_bea
     if device is None:
         try:
             device = next(model.parameters()).device
-        except Exception:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    elif not isinstance(device, torch.device):
-        try:
-            device = torch.device(str(device))
         except Exception:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -393,6 +268,32 @@ def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_bea
         return generated_text
 
 
+class Shaobkj_Load_Florence2_Model:
+    def __init__(self):
+        self.model_bundle = None
+        self.version = None
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        model_list = list(FL2_MODEL_REPOS.keys())
+        return {
+            "required": {
+                "模型版本": (model_list, {"default": "large-PromptGen-v2.0"}),
+            },
+        }
+
+    RETURN_TYPES = ("FLORENCE2",)
+    RETURN_NAMES = ("Florence2模型",)
+    FUNCTION = "load"
+    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+
+    def load(self, 模型版本):
+        if self.model_bundle is None or self.version != 模型版本:
+            self.model_bundle = _load_florence_model(模型版本)
+            self.version = 模型版本
+        return (self.model_bundle,)
+
+
 class Shaobkj_Florence2_Fast_Prompt:
     def __init__(self):
         pass
@@ -436,9 +337,11 @@ class Shaobkj_Florence2_Fast_Prompt:
 
 
 NODE_CLASS_MAPPINGS = {
+    "Shaobkj_Load_Florence2_Model": Shaobkj_Load_Florence2_Model,
     "Shaobkj_Florence2_Fast_Prompt": Shaobkj_Florence2_Fast_Prompt,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "Shaobkj_Load_Florence2_Model": "🤖加载Florence2模型(急速)",
     "Shaobkj_Florence2_Fast_Prompt": "🤖图像急速反推",
 }

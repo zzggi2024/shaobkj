@@ -6,7 +6,7 @@ from .node_llm_app import Shaobkj_LLM_App, Shaobkj_NanoBanana_Prompt
 from .node_loop import Shaobkj_ForLoop_Start, Shaobkj_ForLoop_End
 from .node_load_image_list import Shaobkj_LoadImageListFromDir
 from .node_resolution_judge import Shaobkj_ResolutionJudge
-from .node_florence2_fast_prompt import Shaobkj_Florence2_Fast_Prompt
+from .node_florence2_fast_prompt import Shaobkj_Load_Florence2_Model, Shaobkj_Florence2_Fast_Prompt
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
@@ -24,6 +24,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_NanoBanana_Prompt": Shaobkj_NanoBanana_Prompt,
     "Shaobkj_LoadImageListFromDir": Shaobkj_LoadImageListFromDir,
     "Shaobkj_ResolutionJudge": Shaobkj_ResolutionJudge,
+    "Shaobkj_Load_Florence2_Model": Shaobkj_Load_Florence2_Model,
     "Shaobkj_Florence2_Fast_Prompt": Shaobkj_Florence2_Fast_Prompt,
 }
 
@@ -43,6 +44,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_NanoBanana_Prompt": "🤖香蕉专属提示词",
     "Shaobkj_LoadImageListFromDir": "🤖加载图像列表(路径)",
     "Shaobkj_ResolutionJudge": "🤖分辨率智能判断",
+    "Shaobkj_Load_Florence2_Model": "🤖加载Florence2模型(急速)",
     "Shaobkj_Florence2_Fast_Prompt": "🤖图像急速反推",
 }
 

@@ -1513,7 +1513,7 @@ class Shaobkj_Fixed_Seed:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "固定随机种子；推荐：0"})
+                "seed": ("INT", {"default": 0, "min": 0, "max": 999999999, "tooltip": "固定随机种子；推荐：0"})
             }
         }
 
