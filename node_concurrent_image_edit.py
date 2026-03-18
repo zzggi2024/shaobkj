@@ -1191,8 +1191,9 @@ class Shaobkj_Image_Save:
             "required": {
                 "图像": ("IMAGE", {"tooltip": "输入图像；推荐：连接上游图像输出"}),
                 "保存路径": ("STRING", {"default": "Shaobkj_Save", "multiline": False, "tooltip": "相对输出目录的子路径；推荐：Shaobkj_Save"}),
-                "保存格式": (["jpg", "png（透明底图）", "png（无损）"], {"default": "jpg", "tooltip": "保存格式；推荐：jpg"}),
+                "保存格式": (["png", "jpg", "jpeg", "gif", "tiff", "webp", "bmp"], {"default": "png", "tooltip": "保存格式；推荐：png"}),
                 "文件名": ("STRING", {"default": "image", "multiline": False, "tooltip": "保存文件名(不含扩展名)；推荐：image"}),
+                "dpi": ("INT", {"default": 300, "min": 1, "max": 2400, "step": 1, "tooltip": "输出图像DPI；推荐：300"}),
                 "质量": ("INT", {"default": 100, "min": 1, "max": 100, "step": 1, "tooltip": "JPG 质量(1-100)；推荐：100"}),
                 "预览": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭", "tooltip": "是否在界面显示预览；推荐：开启"}),
             }
@@ -1204,7 +1205,7 @@ class Shaobkj_Image_Save:
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
     OUTPUT_NODE = True
 
-    def save_image(self, 图像, 保存路径, 保存格式, 文件名, 质量, 预览):
+    def save_image(self, 图像, 保存路径, 保存格式, 文件名, dpi, 质量, 预览):
         images = 图像
         if isinstance(images, torch.Tensor) and images.dim() == 3:
             images = images.unsqueeze(0)
@@ -1218,20 +1219,10 @@ class Shaobkj_Image_Save:
             os.makedirs(custom_dir, exist_ok=True)
             out_dir = custom_dir
 
-        fmt_label = 保存格式 if isinstance(保存格式, str) else str(保存格式)
-        is_jpg = fmt_label == "jpg"
-        is_png_transparent = fmt_label == "png（透明底图）"
-        is_png_lossless = fmt_label == "png（无损）"
-
-        if is_jpg:
-            save_params = {"format": "JPEG", "quality": int(质量)}
-            ext = ".jpg"
-        elif is_png_transparent or is_png_lossless:
-            save_params = {"format": "PNG"}
-            ext = ".png"
-        else:
-            save_params = {"format": "JPEG", "quality": int(质量)}
-            ext = ".jpg"
+        fmt_label = str(保存格式).strip().lower() if 保存格式 is not None else "png"
+        valid_formats = {"png", "jpg", "jpeg", "gif", "tiff", "webp", "bmp"}
+        extension = fmt_label if fmt_label in valid_formats else "png"
+        ext = f".{extension}"
 
         base_name = str(文件名).strip() if 文件名 is not None else ""
         base_name = os.path.splitext(os.path.basename(base_name))[0]
@@ -1253,7 +1244,7 @@ class Shaobkj_Image_Save:
                 arr = arr[:, :, None]
             if arr.shape[-1] == 1:
                 arr = np.repeat(arr, 3, axis=2)
-            if is_png_transparent:
+            if extension == "png":
                 if arr.shape[-1] >= 4:
                     img_arr = (arr[:, :, :4] * 255.0).astype(np.uint8)
                     pil_img = Image.fromarray(img_arr, mode="RGBA")
@@ -1279,7 +1270,20 @@ class Shaobkj_Image_Save:
                 filename = f"{base_name}_{counter}{ext}"
                 out_path = os.path.join(out_dir, filename)
                 counter += 1
-            pil_img.save(out_path, **save_params)
+            if extension in ("jpg", "jpeg"):
+                pil_img.save(out_path, format="JPEG", quality=int(质量), dpi=(int(dpi), int(dpi)))
+            elif extension == "png":
+                pil_img.save(out_path, format="PNG", dpi=(int(dpi), int(dpi)))
+            elif extension == "webp":
+                pil_img.save(out_path, format="WEBP", quality=int(质量))
+            elif extension == "gif":
+                pil_img.save(out_path, format="GIF")
+            elif extension == "tiff":
+                pil_img.save(out_path, format="TIFF", quality=int(质量))
+            elif extension == "bmp":
+                pil_img.save(out_path, format="BMP")
+            else:
+                pil_img.save(out_path, format="PNG", dpi=(int(dpi), int(dpi)))
             filenames.append(filename)
             out_paths.append(out_path)
 
