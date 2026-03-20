@@ -111,3 +111,36 @@ class Shaobkj_ResolutionJudge:
             resized_mask = resized_mask_batch[0] if b == 1 else resized_mask_batch
 
         return (exceeded, resized_bhwc, resized_mask)
+
+
+class Shaobkj_GetEdgeLength:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "图像": ("IMAGE", {"tooltip": "输入图像；推荐：连接图像输出"}),
+                "边长选择": (["长边", "短边"], {"default": "长边", "tooltip": "选择输出长边或短边尺寸"}),
+            },
+        }
+
+    RETURN_TYPES = ("INT",)
+    RETURN_NAMES = ("边长",)
+    FUNCTION = "get_edge_length"
+    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+
+    def get_edge_length(self, 图像, 边长选择):
+        if not isinstance(图像, torch.Tensor):
+            raise ValueError("❌ 错误：输入图像类型无效")
+
+        t = 图像
+        if t.dim() == 3:
+            t = t.unsqueeze(0)
+
+        if t.dim() != 4:
+            raise ValueError("❌ 错误：输入图像张量维度必须为 [B,H,W,C] 或 [H,W,C]")
+
+        h = int(t.shape[1])
+        w = int(t.shape[2])
+        if str(边长选择) == "短边":
+            return (min(w, h),)
+        return (max(w, h),)
