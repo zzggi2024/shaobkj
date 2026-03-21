@@ -30,21 +30,11 @@ TASK_TOKEN_MAP = {
     "caption": "<CAPTION>",
     "detailed caption": "<DETAILED_CAPTION>",
     "more detailed caption": "<MORE_DETAILED_CAPTION>",
-    "description": "<DESCRIPTION>",
+    "描述": "<DESCRIPTION>",
     "generate tags(PromptGen 1.5)": "<GENERATE_TAGS>",
     "mixed caption(PromptGen 1.5)": "<MIXED_CAPTION>",
     "mixed caption plus(PromptGen 2.0)": "<MIXED_CAPTION_PLUS>",
     "analyze(PromptGen 2.0)": "<<ANALYZE>>",
-    "object detection": "<OD>",
-    "dense region caption": "<DENSE_REGION_CAPTION>",
-    "region proposal": "<REGION_PROPOSAL>",
-    "region proposal (mask)": "<REGION_PROPOSAL>",
-    "caption to phrase grounding": "<CAPTION_TO_PHRASE_GROUNDING>",
-    "open vocabulary detection": "<OPEN_VOCABULARY_DETECTION>",
-    "region to category": "<REGION_TO_CATEGORY>",
-    "region to description": "<REGION_TO_DESCRIPTION>",
-    "OCR": "<OCR>",
-    "OCR with region": "<OCR_WITH_REGION>",
 }
 
 
@@ -81,21 +71,30 @@ def _extract_text(result):
     if result is None:
         return ""
     if isinstance(result, str):
-        return result
+        # 清理多余的列表格式（例如 "['...']"）
+        text = result.strip()
+        if text.startswith("['") and text.endswith("']"):
+            text = text[2:-2]
+        elif text.startswith('["') and text.endswith('"]'):
+            text = text[2:-2]
+        return text
     if isinstance(result, dict):
         if "labels" in result and isinstance(result["labels"], list):
-            labels = [str(x).replace("</s>", "").strip() for x in result["labels"] if str(x).strip()]
+            labels = [str(x).replace("</s>", "").replace("<s>", "").strip() for x in result["labels"] if str(x).strip()]
             if labels:
                 return ", ".join(labels)
-        for value in result.values():
+        # 尝试提取第一个有效的值
+        for key, value in result.items():
             text = _extract_text(value)
             if text:
                 return text
     if isinstance(result, list):
+        texts = []
         for item in result:
-            text = _extract_text(item)
-            if text:
-                return text
+            t = _extract_text(item)
+            if t:
+                texts.append(t)
+        return ", ".join(texts)
     return str(result)
 
 
@@ -170,6 +169,16 @@ def _load_florence_model(version):
                         low_cpu_mem_usage=True,
                         attn_implementation=attn,
                     )
+                
+                # Dynamically patch GenerationMixin if it's missing (fixes transformers >= 4.45 compatibility)
+                if hasattr(model, "language_model") and not hasattr(model.language_model, "generate"):
+                    try:
+                        from transformers import GenerationMixin
+                        if GenerationMixin not in model.language_model.__class__.__bases__:
+                            model.language_model.__class__.__bases__ = (GenerationMixin,) + model.language_model.__class__.__bases__
+                    except ImportError:
+                        pass
+                
                 processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
                 model = model.to(device)
                 if not hasattr(model.config, "forced_bos_token_id"):
@@ -206,12 +215,23 @@ def _load_florence_model(version):
     raise RuntimeError(f"加载 Florence2 模型失败: {last_error}")
 
 
-def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_beams, do_sample):
+def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_beams, seed):
     if not isinstance(model_bundle, dict):
         raise RuntimeError("Florence2模型对象无效，请重新连接‘🤖加载Florence2模型(急速)’输出。")
 
     task_token = TASK_TOKEN_MAP.get(task, "<MORE_DETAILED_CAPTION>")
+    
+    # 修复：Florence-2 的 processor 需要独立的 text 仅包含 task_token，
+    # 若有额外输入，应在 task_token 之后拼接，并保持内部处理逻辑兼容
     prompt = task_token if not text_input else f"{task_token}{text_input}"
+    
+    # 特殊处理：部分 transformers 版本的 processor 内部断言要求传入的 text 完全等于 task_token
+    # 如果用户有额外输入，我们必须绕过它，或者直接将 task_token 传给 text，后续文本在处理时可能会丢失。
+    # 实际上，大多数官方文档要求：对于带输入的任务，text = task_token + text_input。
+    # 如果引发了 AssertionError: Task token ... should be the only token in the text.
+    # 这是因为该任务不支持附加文本输入，或者 processor 强校验了该任务类型。
+    # 我们这里在传给 processor 时，仍然传递完整 prompt，如果遇到强校验，我们捕获并退回到只传 task_token。
+    
     model = model_bundle.get("model")
     processor = model_bundle.get("processor")
     if model is None or processor is None:
@@ -231,31 +251,91 @@ def _run_florence(model_bundle, image, task, text_input, max_new_tokens, num_bea
         except Exception:
             dtype = torch.float32
 
-    inputs = processor(text=prompt, images=image, return_tensors="pt")
+    # Set seed
+    import random
+    from transformers import set_seed
+    if seed is not None:
+        safe_seed = seed
+        if safe_seed < 0:
+            safe_seed = random.randint(0, 2147483647)
+        if safe_seed > 2147483647:
+            safe_seed = safe_seed % 2147483647
+        torch.manual_seed(safe_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(safe_seed)
+        set_seed(safe_seed)
+
+    # 强制采样：只要种子大于 0（非 0），我们就自动开启采样，以使随机种子能够真正影响文本生成。
+    # 如果种子为 0（固定默认），则不使用采样，走贪婪搜索，保证结果绝对一致且无随机性。
+    is_sample = False
+    temperature = None
+    final_num_beams = int(num_beams)
+    if seed is not None and seed > 0:
+        is_sample = True
+        temperature = 0.7
+        final_num_beams = 1  # 开启采样时，强制束搜索数为 1 才能最大化随机性
+
+    try:
+        inputs = processor(text=prompt, images=image, return_tensors="pt")
+    except AssertionError as e:
+        if "should be the only token" in str(e):
+            print(f"[ComfyUI-shaobkj] 警告: 任务 '{task}' 不支持附加文本输入，已自动忽略额外文本。")
+            inputs = processor(text=task_token, images=image, return_tensors="pt")
+        else:
+            raise e
     inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
 
-    with torch.inference_mode():
-        if device.type == "cuda" and dtype in (torch.float16, torch.bfloat16):
-            with torch.autocast(device_type="cuda", dtype=dtype):
-                generated_ids = model.generate(
-                    input_ids=inputs["input_ids"],
-                    pixel_values=inputs["pixel_values"],
-                    max_new_tokens=int(max_new_tokens),
-                    early_stopping=False,
-                    do_sample=bool(do_sample),
-                    num_beams=int(num_beams),
-                    use_cache=True,
-                )
-        else:
-            generated_ids = model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"],
-                max_new_tokens=int(max_new_tokens),
-                early_stopping=False,
-                do_sample=bool(do_sample),
-                num_beams=int(num_beams),
-                use_cache=True,
-            )
+    from comfy.utils import ProgressBar
+    import threading
+    import time
+    
+    pbar = ProgressBar(100)
+    pbar.update_absolute(0)
+    
+    progress_state = {"stop": False}
+
+    def progress_simulator():
+        current = 0.0
+        while not progress_state["stop"] and current < 95.0:
+            time.sleep(0.1)
+            if current < 30: 
+                step = 5.0
+            elif current < 60: 
+                step = 2.0
+            elif current < 80: 
+                step = 1.0
+            else: 
+                step = 0.2
+            current += step
+            if current > 95: current = 95
+            pbar.update_absolute(int(current))
+
+    t_progress = threading.Thread(target=progress_simulator)
+    t_progress.daemon = True
+    t_progress.start()
+
+    try:
+        with torch.inference_mode():
+            gen_kwargs = {
+                "input_ids": inputs["input_ids"],
+                "pixel_values": inputs["pixel_values"],
+                "max_new_tokens": int(max_new_tokens),
+                "early_stopping": False,
+                "do_sample": is_sample,
+                "num_beams": final_num_beams,
+                "use_cache": True,
+            }
+            if is_sample and temperature is not None:
+                gen_kwargs["temperature"] = temperature
+                
+            if device.type == "cuda" and dtype in (torch.float16, torch.bfloat16):
+                with torch.autocast(device_type="cuda", dtype=dtype):
+                    generated_ids = model.generate(**gen_kwargs)
+            else:
+                generated_ids = model.generate(**gen_kwargs)
+    finally:
+        progress_state["stop"] = True
+        pbar.update_absolute(100)
 
     generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
     try:
@@ -309,7 +389,7 @@ class Shaobkj_Florence2_Fast_Prompt:
                 "文本输入": ("STRING", {"default": ""}),
                 "最大新token": ("INT", {"default": 1024, "min": 1, "step": 1}),
                 "束搜索数": ("INT", {"default": 3, "min": 1, "step": 1}),
-                "采样": ("BOOLEAN", {"default": False}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 999999999, "tooltip": "固定随机种子；推荐：0"}),
             },
         }
 
@@ -318,7 +398,11 @@ class Shaobkj_Florence2_Fast_Prompt:
     FUNCTION = "run"
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
 
-    def run(self, Florence2模型, 图像, 任务, 文本输入, 最大新token, 束搜索数, 采样):
+    @classmethod
+    def IS_CHANGED(cls, Florence2模型, 图像, 任务, 文本输入, 最大新token, 束搜索数, seed):
+        return seed
+
+    def run(self, Florence2模型, 图像, 任务, 文本输入, 最大新token, 束搜索数, seed):
         img = tensor_to_pil(图像[0]).convert("RGB")
         result = _run_florence(
             Florence2模型,
@@ -327,9 +411,27 @@ class Shaobkj_Florence2_Fast_Prompt:
             文本输入,
             最大新token,
             束搜索数,
-            采样,
+            seed,
         )
-        text = _remove_angle_brackets(_extract_text(result)).replace("</s>", "").strip()
+        text = _remove_angle_brackets(_extract_text(result)).replace("</s>", "").replace("<s>", "").strip()
+        
+        # 移除可能残留的任务名称（例如从字典中提取时带出的键名，或生成的特殊前缀）
+        for task_key in TASK_TOKEN_MAP.keys():
+            if text.startswith(f"{task_key}:"):
+                text = text[len(task_key)+1:].strip()
+            if text.startswith(f"'{task_key}':"):
+                text = text[len(task_key)+3:].strip()
+            if text.startswith(f'"{task_key}":'):
+                text = text[len(task_key)+3:].strip()
+        
+        # 移除可能存在的被花括号或方括号包裹的情况（例如 "{'caption': '...'}"）
+        if text.startswith("{") and text.endswith("}"):
+            text = text[1:-1].strip()
+        if text.startswith("'") and text.endswith("'"):
+            text = text[1:-1].strip()
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1].strip()
+
         if not text:
             text = "未生成有效提示词"
         preview = pil_to_tensor(img)
