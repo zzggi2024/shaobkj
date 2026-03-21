@@ -179,6 +179,11 @@ def _load_florence_model(version):
                     except ImportError:
                         pass
                 
+                # Fix for transformers >= 4.45 compatibility where generation_config is expected
+                if hasattr(model, "language_model") and not hasattr(model.language_model, "generation_config"):
+                    from transformers.generation import GenerationConfig
+                    model.language_model.generation_config = GenerationConfig.from_model_config(model.language_model.config) if hasattr(GenerationConfig, "from_model_config") else GenerationConfig()
+                
                 processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
                 model = model.to(device)
                 if not hasattr(model.config, "forced_bos_token_id"):
