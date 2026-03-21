@@ -180,9 +180,17 @@ def _load_florence_model(version):
                         pass
                 
                 # Fix for transformers >= 4.45 compatibility where generation_config is expected
-                if hasattr(model, "language_model") and not hasattr(model.language_model, "generation_config"):
+                if hasattr(model, "language_model"):
                     from transformers.generation import GenerationConfig
-                    model.language_model.generation_config = GenerationConfig.from_model_config(model.language_model.config) if hasattr(GenerationConfig, "from_model_config") else GenerationConfig()
+                    if not hasattr(model.language_model, "generation_config") or model.language_model.generation_config is None:
+                        try:
+                            model.language_model.generation_config = GenerationConfig.from_model_config(model.language_model.config)
+                        except Exception:
+                            model.language_model.generation_config = GenerationConfig()
+                    
+                    # Ensure the generation_config has the necessary method
+                    if not hasattr(model.language_model.generation_config, "_from_model_config"):
+                        model.language_model.generation_config._from_model_config = False
                 
                 processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
                 model = model.to(device)
