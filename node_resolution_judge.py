@@ -19,8 +19,8 @@ class Shaobkj_ResolutionJudge:
             },
         }
 
-    RETURN_TYPES = ("BOOLEAN", "IMAGE", "MASK")
-    RETURN_NAMES = ("是否超出", "阈值图像", "阈值遮罩")
+    RETURN_TYPES = ("BOOLEAN", "IMAGE", "MASK", "INT", "INT")
+    RETURN_NAMES = ("是否超出", "阈值图像", "阈值遮罩", "宽", "高")
     FUNCTION = "judge_resolution"
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
 
@@ -110,7 +110,7 @@ class Shaobkj_ResolutionJudge:
             resized_mask_batch = F.interpolate(m_bchw, size=(new_h, new_w), mode="nearest").squeeze(1)
             resized_mask = resized_mask_batch[0] if b == 1 else resized_mask_batch
 
-        return (exceeded, resized_bhwc, resized_mask)
+        return (exceeded, resized_bhwc, resized_mask, int(new_w), int(new_h))
 
 
 class Shaobkj_GetEdgeLength:
