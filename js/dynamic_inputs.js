@@ -415,6 +415,17 @@ function setupLinkWidget(node) {
     if (!node.widgets) {
         node.widgets = [];
     }
+    const nodeType = node?.type || "";
+    const nodeTitle = node?.title || "";
+    if (nodeType === "Shaobkj_FreeColor" || (typeof nodeTitle === "string" && nodeTitle.includes("自由调色"))) {
+        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
+    }
     const index = node.widgets.findIndex(w => w.name === "API申请地址");
     const defaultUrl = "https://yhmx.work/login?expired=true";
 
