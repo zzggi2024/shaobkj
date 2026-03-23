@@ -1192,6 +1192,7 @@ class Shaobkj_Image_Save:
                 "图像": ("IMAGE", {"tooltip": "输入图像；推荐：连接上游图像输出"}),
                 "保存路径": ("STRING", {"default": "Shaobkj_Save", "multiline": False, "tooltip": "相对输出目录的子路径；推荐：Shaobkj_Save"}),
                 "保存格式": (["png", "jpg", "jpeg", "gif", "tiff", "webp", "bmp"], {"default": "png", "tooltip": "保存格式；推荐：png"}),
+                "模式": (["保持原样", "RGB 颜色", "CMYK 颜色", "Lab 颜色"], {"default": "保持原样", "tooltip": "颜色模式；推荐：保持原样"}),
                 "文件名": ("STRING", {"default": "image", "multiline": False, "tooltip": "保存文件名(不含扩展名)；推荐：image"}),
                 "dpi": ("INT", {"default": 300, "min": 1, "max": 2400, "step": 1, "tooltip": "输出图像DPI；推荐：300"}),
                 "质量": ("INT", {"default": 100, "min": 1, "max": 100, "step": 1, "tooltip": "JPG 质量(1-100)；推荐：100"}),
@@ -1205,7 +1206,7 @@ class Shaobkj_Image_Save:
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
     OUTPUT_NODE = True
 
-    def save_image(self, 图像, 保存路径, 保存格式, 文件名, dpi, 质量, 预览):
+    def save_image(self, 图像, 保存路径, 保存格式, 模式, 文件名, dpi, 质量, 预览):
         images = 图像
         if isinstance(images, torch.Tensor) and images.dim() == 3:
             images = images.unsqueeze(0)
@@ -1231,6 +1232,7 @@ class Shaobkj_Image_Save:
 
         filenames = []
         out_paths = []
+        warning_sent = False
         for i in range(images.shape[0]):
             img_tensor = images[i]
             t = img_tensor
@@ -1263,6 +1265,26 @@ class Shaobkj_Image_Save:
                 else:
                     img_arr = (arr[:, :, :3] * 255.0).astype(np.uint8)
                 pil_img = Image.fromarray(img_arr, mode="RGB")
+
+            selected_mode = str(模式).strip() if 模式 is not None else "保持原样"
+            if selected_mode == "RGB 颜色":
+                pil_img = pil_img.convert("RGB")
+            elif selected_mode == "CMYK 颜色":
+                pil_img = pil_img.convert("CMYK")
+            elif selected_mode == "Lab 颜色":
+                pil_img = pil_img.convert("LAB")
+
+            if extension in ("png", "webp", "gif", "bmp") and pil_img.mode in ("CMYK", "LAB"):
+                if not warning_sent:
+                    PromptServer.instance.send_sync(
+                        "shaobkj.image_save.warning",
+                        {
+                            "message": f"⚠️ 当前保存格式 {extension.upper()} 不支持 {selected_mode}，已自动转为 RGB 保存。"
+                        },
+                    )
+                    warning_sent = True
+                pil_img = pil_img.convert("RGB")
+
             filename = f"{base_name}{ext}"
             out_path = os.path.join(out_dir, filename)
             counter = 1

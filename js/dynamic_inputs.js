@@ -690,6 +690,15 @@ app.registerExtension({
                     alert(msg);
                 }
             });
+            api.addEventListener("shaobkj.image_save.warning", (evt) => {
+                const msg = (evt && evt.detail && evt.detail.message) ? evt.detail.message : "⚠️ 保存格式与颜色模式不兼容，已自动转换为 RGB";
+                if (app?.ui?.dialog?.show) {
+                    app.ui.dialog.show(msg);
+                    setTimeout(() => { app.ui.dialog.close(); }, 2200);
+                } else {
+                    alert(msg);
+                }
+            });
         }).catch(() => {
         });
     },
