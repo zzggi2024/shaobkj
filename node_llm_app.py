@@ -3,6 +3,7 @@ import re
 import io
 import base64
 import traceback
+import random
 import torch
 import requests
 from urllib.parse import urlparse
@@ -179,6 +180,8 @@ class Shaobkj_NanoBanana_Prompt:
             "required": {
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key"}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址"}),
+                "模型选择": (["gemini-2.5-flash", "gemini-3-pro-preview"], {"default": "gemini-2.5-flash", "tooltip": "模型选择"}),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理"}),
                 "用户输入": ("STRING", {"default": "", "multiline": True, "tooltip": "描述你想生成的画面，例如：制作一张xx品牌香水的展示海报"}),
                 "任务类型": (["生成模式 (Generation)", "编辑模式 (Editing)"], {"default": "生成模式 (Generation)", "tooltip": "选择生成提示词还是编辑指令"}),
                 "场景风格": (
@@ -186,11 +189,7 @@ class Shaobkj_NanoBanana_Prompt:
                     {"default": "Editorial (杂志大片)", "tooltip": "仅在生成模式下生效"}
                 ),
                 "品牌名称": ("STRING", {"default": "", "multiline": False, "tooltip": "可选：替换提示词中的 [BRAND]"}),
-                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
-            },
-            "optional": {
-                "原图描述": ("STRING", {"default": "", "multiline": True, "tooltip": "仅在编辑模式下生效：简要描述原图内容"}),
             }
         }
 
@@ -199,17 +198,70 @@ class Shaobkj_NanoBanana_Prompt:
     FUNCTION = "generate_prompt"
     CATEGORY = "🤖shaobkj-APIbox"
 
-    def generate_prompt(self, API密钥, API地址, 用户输入, 任务类型, 场景风格, 品牌名称, 使用系统代理, seed, 原图描述=""):
+    def generate_prompt(self, API密钥, API地址, 用户输入, 任务类型, 模型选择, 场景风格, 品牌名称, 使用系统代理, seed, **kwargs):
         # 1. Select System Prompt based on Task Type
+        is_editing_mode = "Editing" in 任务类型
+        quality_boosters = ["高画质", "细节清晰", "真实光影", "电影级质感", "8k分辨率"]
+        random_seed = int(seed) if int(seed) >= 0 else 0
+
+        def ensure_two_quality_boosters(text):
+            existing = [w for w in quality_boosters if w in text]
+            if len(existing) >= 2:
+                return text
+            rng = random.Random(random_seed + len(text))
+            pool = [w for w in quality_boosters if w not in existing]
+            rng.shuffle(pool)
+            selected = existing + pool[: max(0, 2 - len(existing))]
+            selected = selected[:2]
+            if not selected:
+                return text
+            suffix = "，".join(selected)
+            if text.strip().endswith(("。", "！", "？")):
+                return f"{text}{suffix}。"
+            return f"{text}。{suffix}。"
+
         if "Editing" in 任务类型:
-            system_prompt = """You are an expert AI image editor using Nano Banana Pro. Convert the user's request into a precise, direct editing instruction.
-Rules:
-1. Use imperative verbs (Replace, Remove, Change, Add, Keep).
-2. Be specific about what to change and what to keep.
-3. For background changes: 'Replace the background with [new scene]...'
-4. For restoration: 'Restore this image, remove scratches, enhance details...'
-5. Output ONLY the English instruction, no explanations."""
-            user_content = f"Request: {用户输入}\nOriginal Image Context: {原图描述}"
+            system_prompt = """gemini-3-pro-image-preview多图编辑指令优化
+# Role
+你是一位精通 "gemini-3-pro-image-preview" 图像编辑模型的提示词专家。你的核心能力是理解用户的多图参考意图，生成精准、克制且高质量的中文编辑指令。
+
+# Task
+根据用户的自然语言描述，生成适用于 gemini-3-pro-image-preview 的中文 Prompt。
+
+# Constraints & Rules
+1. 中文输出：所有的 Prompt 必须使用简体中文。
+2. 命令式句式：使用直接、果断的动作动词开头（如：替换、修改、融合、保持、提取）。
+3. 多图逻辑处理：
+- 用户可能提供多张参考图（参考图1、参考图2...）和一张目标图。
+- 必须清晰界定“参考源”与“目标对象”的关系（例如：“提取参考图1的风格赋予目标图”、“将参考图2的物体融合进目标图”）。
+4. 克制联想（高保真）：
+- 严禁随意添加用户未提及的物体或复杂背景。
+- 仅在材质、光影、清晰度这三个维度进行必要的专业术语补全，以保证生成质量。
+5. 画质增强：在 Prompt 末尾追加 2 个通用的画质增强词。
+
+# Output Format
+直接输出 Prompt 内容，不包含任何解释、前言或额外符号。
+
+# Workflow
+1. 分析用户输入，识别涉及的图片数量及各自的角色（参考 vs 目标）。
+2. 提取核心动作（换脸、换装、风格迁移、背景替换等）。
+3. 编写中文指令，确保指代明确（如“将参考图A的...”）。
+4. 检查是否过度联想，删除多余的形容词。
+5. 追加画质词。
+
+# Examples
+User: 把这张图里的人换成这几张参考图里的那个模特，衣服不要变。
+Output: 保持目标图中的服装和背景不变，将人物面部和体型替换为参考图中的模特特征。确保面部光影与原环境完美融合，皮肤质感真实自然。高画质，细节清晰。
+
+User: 用参考图1的配色和参考图2的画风，重绘这张草图。
+Output: 提取参考图1的色彩方案，结合参考图2的绘画风格，对目标草图进行上色和细化重绘。保持草图原有的构图和轮廓，色彩过渡自然。杰作，高分辨率。
+
+User: 给这个杯子加个盖子。
+Output: 在杯子上方添加一个材质匹配的盖子。确保盖子的透视角度、光影反射与杯身一致。真实感，8k画质。
+
+# Quality Boosters (Randomly pick 2)
+(高画质, 细节清晰, 真实光影, 电影级质感, 8k分辨率)"""
+            user_content = f"用户需求：{用户输入}"
         else:
             style_guide = ""
             if "Editorial" in 场景风格:
@@ -246,7 +298,8 @@ Instructions:
         if base_origin.endswith("/v1"):
             base_origin = base_origin[:-3]
         
-        url = f"{base_origin}/v1beta/models/gemini-2.5-flash:generateContent"
+        model = str(模型选择 or "gemini-2.5-flash")
+        url = f"{base_origin}/v1beta/models/{model}:generateContent"
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
         payload = {
@@ -277,6 +330,8 @@ Instructions:
             # Post-processing: Replace [BRAND] placeholder if needed (though LLM should have handled it)
             if 品牌名称 and "[BRAND]" in generated_text:
                 generated_text = generated_text.replace("[BRAND]", 品牌名称)
+            if is_editing_mode:
+                generated_text = ensure_two_quality_boosters(generated_text)
                 
             return (generated_text.strip(),)
             

@@ -14,6 +14,8 @@ const DYNAMIC_NODES = [
     "🤖并发-编辑-文本驱动",
     "Shaobkj_LLM_App",
     "🤖LLM应用",
+    "Shaobkj_NanoBanana_Prompt",
+    "🤖香蕉专属提示词",
 ];
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
@@ -22,6 +24,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Veo_Video",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "Shaobkj_LLM_App",
+    "Shaobkj_NanoBanana_Prompt",
     "Shaobkj_Load_Image_Path",
     "Shaobkj_Load_Batch_Images",
     "Shaobkj_Image_Save",
@@ -148,6 +151,84 @@ function isShaobkjLoadImageListNode(node) {
     const t = node?.type;
     const title = node?.title;
     return t === "Shaobkj_LoadImageListFromDir" || title === "🤖加载图像列表(路径)";
+}
+
+function isShaobkjNanoBananaNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    return t === "Shaobkj_NanoBanana_Prompt" || (typeof title === "string" && title.includes("香蕉专属提示词"));
+}
+
+function findWidgetByNames(node, names) {
+    if (!node?.widgets || !Array.isArray(node.widgets)) return null;
+    for (const name of names) {
+        const widget = node.widgets.find((w) => w && (w.name === name || w.label === name));
+        if (widget) return widget;
+    }
+    return null;
+}
+
+function setWidgetDisabledState(widget, disabled) {
+    let changed = false;
+    if (widget.disabled !== disabled) {
+        widget.disabled = disabled;
+        changed = true;
+    }
+    if (!widget.options) {
+        widget.options = {};
+        changed = true;
+    }
+    if (widget.options.disabled !== disabled) {
+        widget.options.disabled = disabled;
+        changed = true;
+    }
+    if (widget.options.readOnly !== disabled) {
+        widget.options.readOnly = disabled;
+        changed = true;
+    }
+    return changed;
+}
+
+function setupNanoBananaEditingMode(node) {
+    if (!isShaobkjNanoBananaNode(node)) return false;
+    if (!node.widgets) return false;
+    const taskTypeWidget = findWidgetByNames(node, ["任务类型", "Task Type"]);
+    if (!taskTypeWidget) return false;
+    const taskValue = String(taskTypeWidget.value || "");
+    const isEditingMode = taskValue.includes("Editing") || taskValue.includes("编辑模式");
+    const styleWidget = findWidgetByNames(node, ["场景风格", "Scene Style"]);
+    const brandWidget = findWidgetByNames(node, ["品牌名称", "Brand Name"]);
+    let changed = false;
+    if (styleWidget) {
+        changed = setWidgetDisabledState(styleWidget, isEditingMode) || changed;
+        if (styleWidget.options && Array.isArray(styleWidget.options.values)) {
+            if (!styleWidget.__shaobkjOriginalValues) {
+                styleWidget.__shaobkjOriginalValues = [...styleWidget.options.values];
+            }
+            if (isEditingMode) {
+                const onlyCurrent = [styleWidget.value];
+                const same = styleWidget.options.values.length === 1 && styleWidget.options.values[0] === styleWidget.value;
+                if (!same) {
+                    styleWidget.options.values = onlyCurrent;
+                    changed = true;
+                }
+            } else if (Array.isArray(styleWidget.__shaobkjOriginalValues)) {
+                const origin = styleWidget.__shaobkjOriginalValues;
+                const same = styleWidget.options.values.length === origin.length && styleWidget.options.values.every((v, i) => v === origin[i]);
+                if (!same) {
+                    styleWidget.options.values = [...origin];
+                    changed = true;
+                }
+            }
+        }
+    }
+    if (brandWidget) {
+        changed = setWidgetDisabledState(brandWidget, isEditingMode) || changed;
+    }
+    if (changed) {
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
 }
 
 function setupLoadImageListLocalization(node) {
@@ -668,6 +749,7 @@ app.registerExtension({
                     setupLongSideWidget(node);
                     setupUploadButtonLabel(node);
                     setupLoadImageListLocalization(node);
+                    setupNanoBananaEditingMode(node);
                     syncSeedControl(node);
                     sanitizeNumericWidgets(node);
                     if (shouldManageDynamicInputsByNode(node)) {
@@ -733,6 +815,7 @@ app.registerExtension({
                     setupLongSideWidget(this);
                     setupUploadButtonLabel(this);
                     setupLoadImageListLocalization(this);
+                    setupNanoBananaEditingMode(this);
                     syncSeedControl(this);
                     sanitizeNumericWidgets(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
@@ -768,6 +851,7 @@ app.registerExtension({
                 const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
                 
                 setTimeout(() => {
+                    setupNanoBananaEditingMode(this);
                     if (needsDynamicInputs) {
                         manageInputs(this);
                     } else {
@@ -776,7 +860,14 @@ app.registerExtension({
                 }, 50);
                 
                 return r;
-            }
+            };
+
+            const onWidgetChanged = nodeType.prototype.onWidgetChanged;
+            nodeType.prototype.onWidgetChanged = function(name, value, oldValue, widget) {
+                const r = onWidgetChanged ? onWidgetChanged.apply(this, arguments) : undefined;
+                setupNanoBananaEditingMode(this);
+                return r;
+            };
         }
     }
 });
