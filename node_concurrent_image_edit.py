@@ -5,7 +5,6 @@ import threading
 import traceback
 import base64
 import io
-import shutil
 import random
 import re
 import torch
@@ -13,7 +12,7 @@ import numpy as np
 from collections import deque
 from urllib.parse import urlparse
 import folder_paths
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageCms
 from server import PromptServer
 from aiohttp import web
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1192,10 +1191,13 @@ class Shaobkj_Image_Save:
                 "图像": ("IMAGE", {"tooltip": "输入图像；推荐：连接上游图像输出"}),
                 "保存路径": ("STRING", {"default": "Shaobkj_Save", "multiline": False, "tooltip": "相对输出目录的子路径；推荐：Shaobkj_Save"}),
                 "保存格式": (["png", "jpg", "jpeg", "gif", "tiff", "webp", "bmp"], {"default": "png", "tooltip": "保存格式；推荐：png"}),
-                "模式": (["保持原样", "RGB 颜色", "CMYK 颜色", "Lab 颜色"], {"default": "保持原样", "tooltip": "颜色模式；推荐：保持原样"}),
+                "模式": (["保持原色", "RGB 颜色", "CMYK 颜色", "Lab 颜色"], {"default": "保持原色", "tooltip": "颜色模式；推荐：保持原色"}),
                 "文件名": ("STRING", {"default": "image", "multiline": False, "tooltip": "保存文件名(不含扩展名)；推荐：image"}),
                 "dpi": ("INT", {"default": 300, "min": 1, "max": 2400, "step": 1, "tooltip": "输出图像DPI；推荐：300"}),
                 "质量": ("INT", {"default": 100, "min": 1, "max": 100, "step": 1, "tooltip": "JPG 质量(1-100)；推荐：100"}),
+                "自定义尺寸": ("BOOLEAN", {"default": False, "label_on": "是", "label_off": "否", "tooltip": "是否启用中心裁切到指定宽高"}),
+                "宽": ("INT", {"default": 1024, "min": 1, "max": 200000, "step": 1, "tooltip": "自定义输出宽度"}),
+                "高": ("INT", {"default": 1024, "min": 1, "max": 200000, "step": 1, "tooltip": "自定义输出高度"}),
                 "预览": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭", "tooltip": "是否在界面显示预览；推荐：开启"}),
             }
         }
@@ -1206,7 +1208,54 @@ class Shaobkj_Image_Save:
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
     OUTPUT_NODE = True
 
-    def save_image(self, 图像, 保存路径, 保存格式, 模式, 文件名, dpi, 质量, 预览):
+    def save_image(self, 图像, 保存路径, 保存格式, 模式, 文件名, dpi, 质量, 自定义尺寸, 宽, 高, 预览):
+        def resolve_cmyk_profile_path():
+            candidates = []
+            windir = os.environ.get("WINDIR", r"C:\Windows")
+            color_dir = os.path.join(windir, "System32", "spool", "drivers", "color")
+            if os.path.isdir(color_dir):
+                try:
+                    files = [f for f in os.listdir(color_dir) if f.lower().endswith((".icc", ".icm"))]
+                except Exception:
+                    files = []
+                priority_keywords = ["cmyk", "coated", "swop", "fogra", "japan", "pso"]
+                files_sorted = sorted(
+                    files,
+                    key=lambda n: (
+                        0 if any(k in n.lower() for k in priority_keywords) else 1,
+                        n.lower(),
+                    ),
+                )
+                for name in files_sorted:
+                    candidates.append(os.path.join(color_dir, name))
+            for path in candidates:
+                try:
+                    profile = ImageCms.getOpenProfile(path)
+                    color_space = str(getattr(getattr(profile, "profile", None), "xcolor_space", "")).upper()
+                    if "CMYK" in color_space:
+                        return path
+                except Exception:
+                    continue
+            return None
+
+        def convert_rgb_to_cmyk(pil_img_rgb):
+            profile_path = resolve_cmyk_profile_path()
+            if profile_path:
+                try:
+                    src_profile = ImageCms.createProfile("sRGB")
+                    dst_profile = ImageCms.getOpenProfile(profile_path)
+                    converted = ImageCms.profileToProfile(
+                        pil_img_rgb.convert("RGB"),
+                        src_profile,
+                        dst_profile,
+                        outputMode="CMYK",
+                        renderingIntent=0,
+                    )
+                    return converted, False
+                except Exception:
+                    pass
+            return pil_img_rgb.convert("CMYK"), True
+
         images = 图像
         if isinstance(images, torch.Tensor) and images.dim() == 3:
             images = images.unsqueeze(0)
@@ -1233,6 +1282,9 @@ class Shaobkj_Image_Save:
         filenames = []
         out_paths = []
         warning_sent = False
+        crop_warning_sent = False
+        cmyk_profile_warning_sent = False
+        preview_images = []
         for i in range(images.shape[0]):
             img_tensor = images[i]
             t = img_tensor
@@ -1246,6 +1298,23 @@ class Shaobkj_Image_Save:
                 arr = arr[:, :, None]
             if arr.shape[-1] == 1:
                 arr = np.repeat(arr, 3, axis=2)
+            if bool(自定义尺寸):
+                target_w = max(1, int(宽))
+                target_h = max(1, int(高))
+                h_src, w_src = int(arr.shape[0]), int(arr.shape[1])
+                crop_w = min(target_w, w_src)
+                crop_h = min(target_h, h_src)
+                if (crop_w != target_w or crop_h != target_h) and not crop_warning_sent:
+                    PromptServer.instance.send_sync(
+                        "shaobkj.image_save.warning",
+                        {
+                            "message": f"⚠️ 自定义尺寸({target_w}x{target_h})超过原图尺寸，已按中心裁切到可用尺寸({crop_w}x{crop_h})。"
+                        },
+                    )
+                    crop_warning_sent = True
+                x0 = max(0, (w_src - crop_w) // 2)
+                y0 = max(0, (h_src - crop_h) // 2)
+                arr = arr[y0:y0 + crop_h, x0:x0 + crop_w, :]
             if extension == "png":
                 if arr.shape[-1] >= 4:
                     img_arr = (arr[:, :, :4] * 255.0).astype(np.uint8)
@@ -1266,11 +1335,18 @@ class Shaobkj_Image_Save:
                     img_arr = (arr[:, :, :3] * 255.0).astype(np.uint8)
                 pil_img = Image.fromarray(img_arr, mode="RGB")
 
-            selected_mode = str(模式).strip() if 模式 is not None else "保持原样"
+            selected_mode = str(模式).strip() if 模式 is not None else "保持原色"
             if selected_mode == "RGB 颜色":
                 pil_img = pil_img.convert("RGB")
             elif selected_mode == "CMYK 颜色":
-                pil_img = pil_img.convert("CMYK")
+                converted_img, fallback_used = convert_rgb_to_cmyk(pil_img.convert("RGB"))
+                pil_img = converted_img
+                if fallback_used and not cmyk_profile_warning_sent:
+                    PromptServer.instance.send_sync(
+                        "shaobkj.image_save.warning",
+                        {"message": "⚠️ 未找到可用 CMYK ICC 配置文件，已使用基础 CMYK 转换，可能存在显示偏差。"},
+                    )
+                    cmyk_profile_warning_sent = True
             elif selected_mode == "Lab 颜色":
                 pil_img = pil_img.convert("LAB")
 
@@ -1301,46 +1377,40 @@ class Shaobkj_Image_Save:
             elif extension == "gif":
                 pil_img.save(out_path, format="GIF")
             elif extension == "tiff":
-                pil_img.save(out_path, format="TIFF", quality=int(质量))
+                if pil_img.mode == "CMYK":
+                    pil_img.save(out_path, format="TIFF", compression="raw", dpi=(int(dpi), int(dpi)))
+                else:
+                    pil_img.save(out_path, format="TIFF", compression="tiff_deflate", dpi=(int(dpi), int(dpi)))
             elif extension == "bmp":
                 pil_img.save(out_path, format="BMP")
             else:
                 pil_img.save(out_path, format="PNG", dpi=(int(dpi), int(dpi)))
             filenames.append(filename)
             out_paths.append(out_path)
+            preview_base = os.path.splitext(filename)[0]
+            preview_img = None
+            try:
+                with Image.open(out_path) as saved_img:
+                    preview_img = ImageOps.exif_transpose(saved_img).convert("RGB")
+            except Exception:
+                preview_img = pil_img.convert("RGB")
+            preview_images.append((preview_img, preview_base))
 
         if 预览:
             preview_entries = []
-            out_dir_in_output = False
-            try:
-                out_dir_in_output = os.path.commonpath([output_root, out_dir]) == os.path.abspath(output_root)
-            except Exception:
-                out_dir_in_output = False
-
-            if out_dir_in_output:
-                rel_path = os.path.relpath(out_dir, output_root)
-                if rel_path == ".":
-                    rel_path = ""
-                preview_entries = [
-                    {"filename": name, "subfolder": rel_path, "type": "output"}
-                    for name in filenames
-                ]
-            else:
-                preview_dir = os.path.join(output_root, "Shaobkj_Preview")
-                os.makedirs(preview_dir, exist_ok=True)
-                preview_subfolder = "Shaobkj_Preview"
-                for saved_path, saved_name in zip(out_paths, filenames):
-                    preview_name = saved_name
+            preview_dir = os.path.join(output_root, "Shaobkj_Preview")
+            os.makedirs(preview_dir, exist_ok=True)
+            preview_subfolder = "Shaobkj_Preview"
+            for idx, (preview_img, preview_base) in enumerate(preview_images):
+                preview_name = f"{preview_base}.png"
+                preview_path = os.path.join(preview_dir, preview_name)
+                counter = 1
+                while os.path.exists(preview_path):
+                    preview_name = f"{preview_base}_{counter}.png"
                     preview_path = os.path.join(preview_dir, preview_name)
-                    counter = 1
-                    base_preview = os.path.splitext(preview_name)[0]
-                    ext_preview = os.path.splitext(preview_name)[1]
-                    while os.path.exists(preview_path):
-                        preview_name = f"{base_preview}_{counter}{ext_preview}"
-                        preview_path = os.path.join(preview_dir, preview_name)
-                        counter += 1
-                    shutil.copyfile(saved_path, preview_path)
-                    preview_entries.append({"filename": preview_name, "subfolder": preview_subfolder, "type": "output"})
+                    counter += 1
+                preview_img.save(preview_path, format="PNG")
+                preview_entries.append({"filename": preview_name, "subfolder": preview_subfolder, "type": "output"})
 
             return {"ui": {"images": preview_entries}}
         return {}

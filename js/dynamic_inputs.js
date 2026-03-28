@@ -159,6 +159,12 @@ function isShaobkjNanoBananaNode(node) {
     return t === "Shaobkj_NanoBanana_Prompt" || (typeof title === "string" && title.includes("香蕉专属提示词"));
 }
 
+function isShaobkjImageSaveNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    return t === "Shaobkj_Image_Save" || (typeof title === "string" && title.includes("图像保存"));
+}
+
 function findWidgetByNames(node, names) {
     if (!node?.widgets || !Array.isArray(node.widgets)) return null;
     for (const name of names) {
@@ -225,6 +231,23 @@ function setupNanoBananaEditingMode(node) {
     if (brandWidget) {
         changed = setWidgetDisabledState(brandWidget, isEditingMode) || changed;
     }
+    if (changed) {
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
+}
+
+function setupImageSaveCustomSizeMode(node) {
+    if (!isShaobkjImageSaveNode(node)) return false;
+    if (!node.widgets) return false;
+    const enableWidget = findWidgetByNames(node, ["自定义尺寸"]);
+    const widthWidget = findWidgetByNames(node, ["宽"]);
+    const heightWidget = findWidgetByNames(node, ["高"]);
+    if (!enableWidget || !widthWidget || !heightWidget) return false;
+    const enabled = Boolean(enableWidget.value);
+    let changed = false;
+    changed = setWidgetDisabledState(widthWidget, !enabled) || changed;
+    changed = setWidgetDisabledState(heightWidget, !enabled) || changed;
     if (changed) {
         node.setDirtyCanvas(true, true);
     }
@@ -816,6 +839,7 @@ app.registerExtension({
                     setupUploadButtonLabel(this);
                     setupLoadImageListLocalization(this);
                     setupNanoBananaEditingMode(this);
+                    setupImageSaveCustomSizeMode(this);
                     syncSeedControl(this);
                     sanitizeNumericWidgets(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
@@ -852,6 +876,7 @@ app.registerExtension({
                 
                 setTimeout(() => {
                     setupNanoBananaEditingMode(this);
+                    setupImageSaveCustomSizeMode(this);
                     if (needsDynamicInputs) {
                         manageInputs(this);
                     } else {
@@ -866,6 +891,7 @@ app.registerExtension({
             nodeType.prototype.onWidgetChanged = function(name, value, oldValue, widget) {
                 const r = onWidgetChanged ? onWidgetChanged.apply(this, arguments) : undefined;
                 setupNanoBananaEditingMode(this);
+                setupImageSaveCustomSizeMode(this);
                 return r;
             };
         }
