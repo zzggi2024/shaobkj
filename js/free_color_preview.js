@@ -6,10 +6,12 @@ const PREVIEW_EVENTS = [PREVIEW_EVENT, "free_color_preview"];
 const PREVIEW_HEIGHT = 220;
 const PREVIEW_PADDING = 10;
 const PRESET_WIDGET_NAME = "一键恢复";
+const TARGET_COLOR_WIDGET_NAME = "目标颜色";
 const PRESET_OPTION_DEFAULT = "默认";
+const PRESET_OPTION_CUSTOM = "当前已修改";
 const PRESET_OPTION_ADD = "记录并新增";
 const PRESET_OPTION_MANAGE_DELETE = "管理删除";
-const PRESET_RESERVED = new Set([PRESET_OPTION_DEFAULT, PRESET_OPTION_ADD]);
+const PRESET_RESERVED = new Set([PRESET_OPTION_DEFAULT, PRESET_OPTION_CUSTOM, PRESET_OPTION_ADD]);
 const SLIDER_WIDGETS = new Set([
     "色相",
     "饱和度",
@@ -24,6 +26,7 @@ const SLIDER_WIDGETS = new Set([
     "遮罩羽化",
 ]);
 const PRESET_PARAM_DEFAULTS = {
+    目标颜色: "全部",
     色相: 0,
     饱和度: 0,
     亮度: 0,
@@ -35,7 +38,6 @@ const PRESET_PARAM_DEFAULTS = {
     蓝通道: 0,
     强度: 100,
     遮罩羽化: 0,
-    反转遮罩: false,
 };
 const PARAM_NAMES = {
     hue: ["色相", "hue"],
@@ -110,6 +112,20 @@ function getWidgetNumber(node, aliases, fallback = 0) {
     return fallback;
 }
 
+function getWidgetValue(node, aliases, fallback = null) {
+    const widgets = node?.widgets || [];
+    for (const alias of aliases) {
+        const w = widgets.find((item) => item?.name === alias);
+        if (!w) {
+            continue;
+        }
+        if (w.value !== undefined && w.value !== null) {
+            return w.value;
+        }
+    }
+    return fallback;
+}
+
 function rgbToHsv(r, g, b) {
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
@@ -151,12 +167,54 @@ function hsvToRgb(h, s, v) {
     return [v, p, q];
 }
 
+function smoothstep(edge0, edge1, value) {
+    const size = Math.max(edge1 - edge0, 1e-8);
+    const t = clamp01((value - edge0) / size);
+    return t * t * (3 - 2 * t);
+}
+
+function hueWeight(hue, center, innerWidth, outerWidth) {
+    const distance = Math.abs((((hue - center) + 0.5) % 1 + 1) % 1 - 0.5);
+    return 1 - smoothstep(innerWidth, outerWidth, distance);
+}
+
+function buildTargetMask(targetColor, h, s, v) {
+    if (!targetColor || targetColor === "全部") {
+        return 1;
+    }
+    const chromaGate = smoothstep(0.08, 0.2, s) * smoothstep(0.08, 0.18, v);
+    const hueCenters = {
+        红色: 0,
+        黄色: 1 / 6,
+        绿色: 2 / 6,
+        青色: 3 / 6,
+        蓝色: 4 / 6,
+        洋红: 5 / 6,
+    };
+    if (Object.prototype.hasOwnProperty.call(hueCenters, targetColor)) {
+        return hueWeight(h, hueCenters[targetColor], 0.055, 0.11) * chromaGate;
+    }
+    if (targetColor === "白色") {
+        return (1 - smoothstep(0.08, 0.22, s)) * smoothstep(0.72, 0.92, v);
+    }
+    if (targetColor === "中性灰") {
+        const lowSat = 1 - smoothstep(0.12, 0.28, s);
+        const midVal = smoothstep(0.12, 0.35, v) * (1 - smoothstep(0.68, 0.88, v));
+        return lowSat * midVal;
+    }
+    if (targetColor === "黑色") {
+        return (1 - smoothstep(0.08, 0.25, s)) * (1 - smoothstep(0.08, 0.3, v));
+    }
+    return 1;
+}
+
 function renderLocalPreview(node) {
     if (!node || !node.__shaobkjFreeColorBaseImageData || !node.__shaobkjFreeColorPreviewCanvas) {
         return;
     }
     const base = node.__shaobkjFreeColorBaseImageData;
     const data = new Uint8ClampedArray(base.data);
+    const targetColor = String(getWidgetValue(node, [TARGET_COLOR_WIDGET_NAME, "target_color"], "全部") || "全部");
     const hue = getWidgetNumber(node, PARAM_NAMES.hue, 0);
     const saturation = getWidgetNumber(node, PARAM_NAMES.saturation, 0);
     const brightness = getWidgetNumber(node, PARAM_NAMES.brightness, 0);
@@ -167,6 +225,7 @@ function renderLocalPreview(node) {
     const green = getWidgetNumber(node, PARAM_NAMES.green, 0);
     const blue = getWidgetNumber(node, PARAM_NAMES.blue, 0);
     const strength = getWidgetNumber(node, PARAM_NAMES.strength, 100);
+    const invertMask = Boolean(getWidgetValue(node, ["反转遮罩", "invert_mask"], false));
     const hueShift = hue / 360;
     const satScale = 1 + saturation / 100;
     const brightnessShift = brightness / 100;
@@ -183,6 +242,7 @@ function renderLocalPreview(node) {
         const sg = data[i + 1] / 255;
         const sb = data[i + 2] / 255;
         const hsv = rgbToHsv(sr, sg, sb);
+        const targetMask = buildTargetMask(targetColor, hsv[0], hsv[1], hsv[2]);
         let h = hsv[0] + hueShift;
         h -= Math.floor(h);
         const s = clamp01(hsv[1] * satScale);
@@ -200,10 +260,11 @@ function renderLocalPreview(node) {
         r = clamp01(r);
         g = clamp01(g);
         b = clamp01(b);
-        r = clamp01(sr + (r - sr) * amount);
-        g = clamp01(sg + (g - sg) * amount);
-        b = clamp01(sb + (b - sb) * amount);
-        const maskAlpha = mask ? (mask.data[i] / 255) : 1;
+        r = clamp01(sr + (r - sr) * amount * targetMask);
+        g = clamp01(sg + (g - sg) * amount * targetMask);
+        b = clamp01(sb + (b - sb) * amount * targetMask);
+        const rawMaskAlpha = mask ? (mask.data[i] / 255) : 1;
+        const maskAlpha = invertMask ? (1 - rawMaskAlpha) : rawMaskAlpha;
         const fr = clamp01(sr + (r - sr) * maskAlpha);
         const fg = clamp01(sg + (g - sg) * maskAlpha);
         const fb = clamp01(sb + (b - sb) * maskAlpha);
@@ -246,6 +307,7 @@ function installRealtimeHooks(node) {
         const originalCallback = widget.callback;
         widget.callback = function () {
             const ret = originalCallback ? originalCallback.apply(this, arguments) : undefined;
+            syncPresetState(node);
             scheduleLocalPreview(node);
             return ret;
         };
@@ -326,7 +388,7 @@ function getPresetStore(node) {
         store.current = PRESET_OPTION_DEFAULT;
     }
     store.order = store.order.filter((name) => typeof name === "string" && name.trim() && !PRESET_RESERVED.has(name));
-    if (store.current !== PRESET_OPTION_DEFAULT && !store.order.includes(store.current)) {
+    if (store.current !== PRESET_OPTION_DEFAULT && store.current !== PRESET_OPTION_CUSTOM && !store.order.includes(store.current)) {
         store.current = PRESET_OPTION_DEFAULT;
     }
     return store;
@@ -364,7 +426,12 @@ function getCurrentPresetName(node) {
 
 function getPresetOptions(node) {
     const store = getPresetStore(node);
-    return [PRESET_OPTION_DEFAULT, PRESET_OPTION_ADD, PRESET_OPTION_MANAGE_DELETE, ...store.order];
+    const options = [PRESET_OPTION_DEFAULT];
+    if (store.current === PRESET_OPTION_CUSTOM) {
+        options.push(PRESET_OPTION_CUSTOM);
+    }
+    options.push(PRESET_OPTION_ADD, PRESET_OPTION_MANAGE_DELETE, ...store.order);
+    return options;
 }
 
 function updatePresetWidgetDisplay(node) {
@@ -536,6 +603,41 @@ function collectCurrentParams(node) {
         params[key] = widget.value;
     }
     return params;
+}
+
+function paramsEqual(left, right) {
+    for (const [key, defaultValue] of Object.entries(PRESET_PARAM_DEFAULTS)) {
+        const leftValue = Object.prototype.hasOwnProperty.call(left || {}, key) ? left[key] : defaultValue;
+        const rightValue = Object.prototype.hasOwnProperty.call(right || {}, key) ? right[key] : defaultValue;
+        if (leftValue !== rightValue) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function resolvePresetNameFromParams(node) {
+    const currentParams = collectCurrentParams(node);
+    if (paramsEqual(currentParams, PRESET_PARAM_DEFAULTS)) {
+        return PRESET_OPTION_DEFAULT;
+    }
+    const store = getPresetStore(node);
+    for (const name of store.order) {
+        const params = store.presets[name];
+        if (params && typeof params === "object" && paramsEqual(currentParams, params)) {
+            return name;
+        }
+    }
+    return PRESET_OPTION_CUSTOM;
+}
+
+function syncPresetState(node) {
+    if (!node) {
+        return;
+    }
+    const store = getPresetStore(node);
+    store.current = resolvePresetNameFromParams(node);
+    updatePresetWidgetDisplay(node);
 }
 
 function applyParams(node, params) {

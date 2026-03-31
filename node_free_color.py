@@ -15,12 +15,25 @@ class Shaobkj_FreeColor:
     FUNCTION = "apply_free_color"
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
+    TARGET_COLORS = (
+        "全部",
+        "红色",
+        "黄色",
+        "绿色",
+        "青色",
+        "蓝色",
+        "洋红",
+        "白色",
+        "中性灰",
+        "黑色",
+    )
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "图像": ("IMAGE",),
+                "目标颜色": (cls.TARGET_COLORS, {"default": "全部"}),
                 "色相": ("FLOAT", {"default": 0.0, "min": -180.0, "max": 180.0, "step": 1.0, "display": "slider"}),
                 "饱和度": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step": 1.0, "display": "slider"}),
                 "亮度": ("FLOAT", {"default": 0.0, "min": -100.0, "max": 100.0, "step": 1.0, "display": "slider"}),
@@ -44,6 +57,7 @@ class Shaobkj_FreeColor:
 
     def apply_free_color(self, **kwargs):
         image = kwargs.get("图像", kwargs.get("image"))
+        target_color = kwargs.get("目标颜色", kwargs.get("target_color", "全部"))
         hue = kwargs.get("色相", kwargs.get("hue", 0.0))
         saturation = kwargs.get("饱和度", kwargs.get("saturation", 0.0))
         brightness = kwargs.get("亮度", kwargs.get("brightness", 0.0))
@@ -68,6 +82,7 @@ class Shaobkj_FreeColor:
             orig = image[i]
             processed = self._process_single(
                 orig,
+                target_color,
                 hue,
                 saturation,
                 brightness,
@@ -94,6 +109,7 @@ class Shaobkj_FreeColor:
     def _process_single(
         self,
         image,
+        target_color,
         hue,
         saturation,
         brightness,
@@ -106,6 +122,7 @@ class Shaobkj_FreeColor:
         strength,
     ):
         src = torch.clamp(image, 0.0, 1.0)
+        color_mask = self._build_target_mask(src, target_color).unsqueeze(-1)
         hsv = self._rgb_to_hsv(src)
         hue_shift = hue / 360.0
         sat_scale = 1.0 + saturation / 100.0
@@ -122,8 +139,47 @@ class Shaobkj_FreeColor:
         out = torch.stack((out_r, out_g, out_b), dim=-1)
         out = torch.clamp(out, 0.0, 1.0)
         amount = strength / 100.0
-        mixed = src + (out - src) * amount
+        mixed = src + (out - src) * amount * color_mask
         return torch.clamp(mixed, 0.0, 1.0)
+
+    def _smoothstep(self, edge0, edge1, value):
+        t = (value - edge0) / max(edge1 - edge0, 1e-8)
+        t = torch.clamp(t, 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
+    def _hue_weight(self, hue, center, inner_width, outer_width):
+        distance = torch.abs(torch.remainder(hue - center + 0.5, 1.0) - 0.5)
+        inner = torch.tensor(inner_width, device=hue.device, dtype=hue.dtype)
+        outer = torch.tensor(outer_width, device=hue.device, dtype=hue.dtype)
+        return 1.0 - self._smoothstep(inner, outer, distance)
+
+    def _build_target_mask(self, image, target_color):
+        if str(target_color) == "全部":
+            return torch.ones(image.shape[:2], device=image.device, dtype=image.dtype)
+        hsv = self._rgb_to_hsv(image)
+        hue = hsv[..., 0]
+        sat = hsv[..., 1]
+        val = hsv[..., 2]
+        chroma_gate = self._smoothstep(0.08, 0.2, sat) * self._smoothstep(0.08, 0.18, val)
+        hue_centers = {
+            "红色": 0.0,
+            "黄色": 1.0 / 6.0,
+            "绿色": 2.0 / 6.0,
+            "青色": 3.0 / 6.0,
+            "蓝色": 4.0 / 6.0,
+            "洋红": 5.0 / 6.0,
+        }
+        if target_color in hue_centers:
+            return self._hue_weight(hue, hue_centers[target_color], 0.055, 0.11) * chroma_gate
+        if str(target_color) == "白色":
+            return (1.0 - self._smoothstep(0.08, 0.22, sat)) * self._smoothstep(0.72, 0.92, val)
+        if str(target_color) == "中性灰":
+            low_sat = 1.0 - self._smoothstep(0.12, 0.28, sat)
+            mid_val = self._smoothstep(0.12, 0.35, val) * (1.0 - self._smoothstep(0.68, 0.88, val))
+            return low_sat * mid_val
+        if str(target_color) == "黑色":
+            return (1.0 - self._smoothstep(0.08, 0.25, sat)) * (1.0 - self._smoothstep(0.08, 0.3, val))
+        return torch.ones(image.shape[:2], device=image.device, dtype=image.dtype)
 
     def _prepare_mask(self, mask, batch_index, target_h, target_w, device, mask_blur, invert_mask):
         m = mask
