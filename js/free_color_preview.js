@@ -5,6 +5,7 @@ const PREVIEW_EVENT = "shaobkj.free_color.preview";
 const PREVIEW_EVENTS = [PREVIEW_EVENT, "free_color_preview"];
 const PREVIEW_HEIGHT = 220;
 const PREVIEW_PADDING = 10;
+const SYNC_POLL_MS = 120;
 const PRESET_WIDGET_NAME = "一键恢复";
 const TARGET_COLOR_WIDGET_NAME = "目标颜色";
 const PRESET_OPTION_DEFAULT = "默认";
@@ -377,6 +378,19 @@ function handleSnapshotDrivenSync(node) {
         scheduleLocalPreview(node);
         syncWidgetSnapshot(node);
     }
+}
+
+function startGlobalFreeColorSyncLoop() {
+    if (window.__shaobkjFreeColorSyncLoopStarted) {
+        return;
+    }
+    window.__shaobkjFreeColorSyncLoopStarted = true;
+    window.setInterval(() => {
+        const nodes = findFreeColorNodes();
+        for (const node of nodes) {
+            handleSnapshotDrivenSync(node);
+        }
+    }, SYNC_POLL_MS);
 }
 
 function applyPreviewToNode(node, detail) {
@@ -904,6 +918,7 @@ app.registerExtension({
                 lastPointerAnchor = { x, y };
             }, true);
         }
+        startGlobalFreeColorSyncLoop();
         const handlePreviewEvent = (event) => {
             const detail = event?.detail || {};
             const src = detail.image;
