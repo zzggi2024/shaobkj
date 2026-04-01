@@ -114,33 +114,81 @@ function clamp01(v) {
     return v;
 }
 
-function getWidgetNumber(node, aliases, fallback = 0) {
+function normalizeWidgetText(raw) {
+    if (typeof raw !== "string") {
+        return "";
+    }
+    const text = raw.trim();
+    if (!text) {
+        return "";
+    }
+    const knownNames = [...SNAPSHOT_WIDGETS, ...SLIDER_WIDGETS];
+    for (const name of knownNames) {
+        if (text === name) {
+            return name;
+        }
+        if (text.startsWith(`${name}:`) || text.startsWith(`${name}：`) || text.startsWith(`${name} `)) {
+            return name;
+        }
+    }
+    return text;
+}
+
+function findWidgetByAliases(node, aliases) {
     const widgets = node?.widgets || [];
-    for (const alias of aliases) {
-        const w = widgets.find((item) => item?.name === alias);
-        if (!w) {
+    const targets = aliases.map((alias) => String(alias || "").trim()).filter(Boolean);
+    for (const widget of widgets) {
+        if (!widget) {
             continue;
         }
-        const value = Number(w.value);
-        if (Number.isFinite(value)) {
-            return value;
+        const candidates = [widget.name, widget.label].map(normalizeWidgetText).filter(Boolean);
+        for (const target of targets) {
+            if (candidates.includes(target)) {
+                return widget;
+            }
         }
+    }
+    return null;
+}
+
+function getWidgetNumber(node, aliases, fallback = 0) {
+    const widget = findWidgetByAliases(node, aliases);
+    if (!widget) {
+        return fallback;
+    }
+    const value = Number(widget.value);
+    if (Number.isFinite(value)) {
+        return value;
     }
     return fallback;
 }
 
 function getWidgetValue(node, aliases, fallback = null) {
-    const widgets = node?.widgets || [];
-    for (const alias of aliases) {
-        const w = widgets.find((item) => item?.name === alias);
-        if (!w) {
-            continue;
-        }
-        if (w.value !== undefined && w.value !== null) {
-            return w.value;
-        }
+    const widget = findWidgetByAliases(node, aliases);
+    if (widget && widget.value !== undefined && widget.value !== null) {
+        return widget.value;
     }
     return fallback;
+}
+
+function parseWidgetBoolean(value) {
+    if (typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "number") {
+        return value !== 0;
+    }
+    const text = String(value || "").trim().toLowerCase();
+    if (!text) {
+        return false;
+    }
+    if (text === "false" || text === "0" || text === "off" || text === "no") {
+        return false;
+    }
+    if (text === "true" || text === "1" || text === "on" || text === "yes") {
+        return true;
+    }
+    return Boolean(value);
 }
 
 function rgbToHsv(r, g, b) {
@@ -242,7 +290,7 @@ function renderLocalPreview(node) {
     const green = getWidgetNumber(node, PARAM_NAMES.green, 0);
     const blue = getWidgetNumber(node, PARAM_NAMES.blue, 0);
     const strength = getWidgetNumber(node, PARAM_NAMES.strength, 100);
-    const invertMask = Boolean(getWidgetValue(node, ["反转遮罩", "invert_mask"], false));
+    const invertMask = parseWidgetBoolean(getWidgetValue(node, ["反转遮罩", "invert_mask"], false));
     const hueShift = hue / 360;
     const satScale = 1 + saturation / 100;
     const brightnessShift = brightness / 100;
@@ -445,8 +493,7 @@ function applyPreviewToNode(node, detail) {
 }
 
 function getWidgetByName(node, name) {
-    const widgets = node?.widgets || [];
-    return widgets.find((w) => w?.name === name) || null;
+    return findWidgetByAliases(node, [name]);
 }
 
 function getPresetStore(node) {
