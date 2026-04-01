@@ -870,6 +870,7 @@ app.registerExtension({
             ensureNodeHeight(this);
             ensurePresetWidget(this);
             enforceSliderWidgets(this);
+            syncPresetState(this);
             installRealtimeHooks(this);
             return r;
         };
@@ -880,6 +881,7 @@ app.registerExtension({
             ensureNodeHeight(this);
             ensurePresetWidget(this);
             enforceSliderWidgets(this);
+            syncPresetState(this);
             installRealtimeHooks(this);
             this.setDirtyCanvas(true, true);
             return r;
@@ -890,12 +892,14 @@ app.registerExtension({
             const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
             ensurePresetWidget(this);
             enforceSliderWidgets(this);
+            syncPresetState(this);
             return r;
         };
 
         const onWidgetChanged = nodeType.prototype.onWidgetChanged;
         nodeType.prototype.onWidgetChanged = function () {
             const r = onWidgetChanged ? onWidgetChanged.apply(this, arguments) : undefined;
+            syncPresetState(this);
             scheduleLocalPreview(this);
             return r;
         };
