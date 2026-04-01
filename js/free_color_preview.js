@@ -6,9 +6,6 @@ const PREVIEW_EVENTS = [PREVIEW_EVENT, "free_color_preview"];
 const PREVIEW_HEIGHT = 220;
 const PREVIEW_PADDING = 10;
 const SYNC_POLL_MS = 120;
-const DEBUG_VERSION = "dbg-2026-04-01-3";
-const DEBUG_LINE_HEIGHT = 14;
-const DEBUG_BLOCK_HEIGHT = DEBUG_LINE_HEIGHT * 3 + 8;
 const PRESET_WIDGET_NAME = "一键恢复";
 const TARGET_COLOR_WIDGET_NAME = "目标颜色";
 const PRESET_OPTION_DEFAULT = "默认";
@@ -101,7 +98,7 @@ function ensureNodeHeight(node) {
     if (!node.__shaobkjFreeColorBaseHeight) {
         node.__shaobkjFreeColorBaseHeight = node.size ? node.size[1] : 200;
     }
-    const minHeight = node.__shaobkjFreeColorBaseHeight + PREVIEW_HEIGHT + PREVIEW_PADDING * 2 + DEBUG_BLOCK_HEIGHT;
+    const minHeight = node.__shaobkjFreeColorBaseHeight + PREVIEW_HEIGHT + PREVIEW_PADDING * 2;
     if (node.size && node.size[1] < minHeight) {
         node.size[1] = minHeight;
     }
@@ -497,16 +494,6 @@ function applyPreviewToNode(node, detail) {
 
 function getWidgetByName(node, name) {
     return findWidgetByAliases(node, [name]);
-}
-
-function getDebugLines(node) {
-    const invertMask = parseWidgetBoolean(getWidgetValue(node, ["反转遮罩", "invert_mask"], false));
-    const presetName = getCurrentPresetName(node);
-    return [
-        `前端: ${DEBUG_VERSION}`,
-        `反转遮罩: ${invertMask ? "true" : "false"}`,
-        `预设状态: ${presetName || PRESET_OPTION_DEFAULT}`,
-    ];
 }
 
 function getPresetStore(node) {
@@ -1070,16 +1057,9 @@ app.registerExtension({
             }
             const x = PREVIEW_PADDING + (contentWidth - drawWidth) * 0.5;
             const y = this.size[1] - drawHeight - PREVIEW_PADDING;
-            const debugTop = Math.max(PREVIEW_PADDING, y - DEBUG_BLOCK_HEIGHT);
-            const debugLines = getDebugLines(this);
             ctx.save();
             ctx.fillStyle = "#0f1117";
-            ctx.fillRect(PREVIEW_PADDING, debugTop, contentWidth, this.size[1] - debugTop - PREVIEW_PADDING);
-            ctx.fillStyle = "#9fb3c8";
-            ctx.font = "12px sans-serif";
-            for (let i = 0; i < debugLines.length; i += 1) {
-                ctx.fillText(debugLines[i], PREVIEW_PADDING + 6, debugTop + 16 + i * DEBUG_LINE_HEIGHT);
-            }
+            ctx.fillRect(PREVIEW_PADDING, this.size[1] - maxHeight - PREVIEW_PADDING, contentWidth, maxHeight);
             ctx.drawImage(canvas, x, y, drawWidth, drawHeight);
             ctx.restore();
             return r;
