@@ -1081,13 +1081,13 @@ class Shaobkj_Load_Batch_Images:
                 "directory": ("STRING", {"default": "", "multiline": False, "placeholder": "输入文件夹路径 (如 C:\\images)", "tooltip": "图片所在文件夹路径；推荐：填写有效路径"}),
                 "image_load_cap": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "限制加载数量，0为不限制；推荐：0"}),
                 "start_index": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "从第几个文件开始加载；推荐：0"}),
-                "load_always": ("BOOLEAN", {"default": False, "label_on": "enabled", "label_off": "disabled", "tooltip": "每次运行都重新加载；推荐：关闭"}),
+                "load_always": ("BOOLEAN", {"default": False, "label_on": "开启", "label_off": "关闭", "tooltip": "每次运行都重新加载；推荐：关闭"}),
                 "sort_method": (["numerical", "alphabetical", "date"], {"default": "numerical", "tooltip": "文件排序方式；推荐：numerical"}),
             }
         }
 
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
-    RETURN_NAMES = ("images", "masks", "filenames")
+    RETURN_NAMES = ("图像", "遮罩", "文件名")
     FUNCTION = "load_images"
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
 
@@ -1641,7 +1641,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
     "Shaobkj_Load_Image_Path": "🤖加载图像",
-    "Shaobkj_Load_Batch_Images": "🤖批量加载图片 (Path)",
+    "Shaobkj_Load_Batch_Images": "🤖批量加载图像(路径)",
     "Shaobkj_Image_Save": "🤖图像保存",
     "Shaobkj_FourWayRepair_HD": "🤖四方修复高清",
     "Shaobkj_Fixed_Seed": "🤖固定随机种子"

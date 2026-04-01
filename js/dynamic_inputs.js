@@ -30,6 +30,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Image_Save",
     "Shaobkj_Fixed_Seed",
     "Shaobkj_LoadImageListFromDir",
+    "Shaobkj_Text_Process",
 ];
 const MIN_INPUTS = 2;
 let started = false;
@@ -153,6 +154,12 @@ function isShaobkjLoadImageListNode(node) {
     return t === "Shaobkj_LoadImageListFromDir" || title === "🤖加载图像列表(路径)";
 }
 
+function isShaobkjLoadBatchImagesNode(node) {
+    const t = node?.type;
+    const title = node?.title;
+    return t === "Shaobkj_Load_Batch_Images" || title === "🤖批量加载图像(路径)" || title === "🤖批量加载图片 (Path)";
+}
+
 function isShaobkjNanoBananaNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
@@ -163,6 +170,12 @@ function isShaobkjImageSaveNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
     return t === "Shaobkj_Image_Save" || (typeof title === "string" && title.includes("图像保存"));
+}
+
+function isShaobkjTextProcessNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    return t === "Shaobkj_Text_Process" || (typeof title === "string" && title.includes("文本处理"));
 }
 
 function findWidgetByNames(node, names) {
@@ -191,6 +204,115 @@ function setWidgetDisabledState(widget, disabled) {
     if (widget.options.readOnly !== disabled) {
         widget.options.readOnly = disabled;
         changed = true;
+    }
+    return changed;
+}
+
+function setWidgetHiddenState(widget, hidden) {
+    if (!widget) return false;
+    let changed = false;
+    const nextType = hidden ? "hidden" : (widget.__shaobkjOriginalType || widget.type || "number");
+    if (!widget.__shaobkjOriginalType) {
+        widget.__shaobkjOriginalType = widget.type || "number";
+    }
+    if (!widget.__shaobkjOriginalComputeSize && typeof widget.computeSize === "function") {
+        widget.__shaobkjOriginalComputeSize = widget.computeSize;
+    }
+    if (!widget.__shaobkjHiddenComputeSize) {
+        widget.__shaobkjHiddenComputeSize = () => [0, -4];
+    }
+    if (hidden) {
+        if (widget.type !== nextType) {
+            widget.type = nextType;
+            changed = true;
+        }
+        if (widget.computeSize !== widget.__shaobkjHiddenComputeSize) {
+            widget.computeSize = widget.__shaobkjHiddenComputeSize;
+            changed = true;
+        }
+    } else {
+        if (widget.type !== nextType) {
+            widget.type = nextType;
+            changed = true;
+        }
+        const originalComputeSize = widget.__shaobkjOriginalComputeSize;
+        if (originalComputeSize && widget.computeSize !== originalComputeSize) {
+            widget.computeSize = originalComputeSize;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+function getLinkedTextValue(node, inputName) {
+    try {
+        if (!node || !node.graph || !Array.isArray(node.inputs)) {
+            return null;
+        }
+        const input = node.inputs.find((item) => item && item.name === inputName);
+        if (!input || input.link == null) {
+            return null;
+        }
+        const link = node.graph.links && node.graph.links[input.link];
+        if (!link) {
+            return null;
+        }
+        const originNode = node.graph.getNodeById ? node.graph.getNodeById(link.origin_id) : null;
+        if (!originNode || !Array.isArray(originNode.widgets)) {
+            return null;
+        }
+        for (const widget of originNode.widgets) {
+            if (typeof widget?.value === "string") {
+                return widget.value;
+            }
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+function getTextProcessSourceText(node) {
+    const linkedText = getLinkedTextValue(node, "文本");
+    if (typeof linkedText === "string" && linkedText !== "") {
+        return linkedText;
+    }
+    const textWidget = findWidgetByNames(node, ["文本"]);
+    return textWidget ? String(textWidget.value ?? "") : "";
+}
+
+function getTextProcessMaxLineCount(node) {
+    const textValue = getTextProcessSourceText(node);
+    if (!textValue) return 0;
+    const lines = textValue.split(/\r?\n/);
+    return lines.filter((line) => String(line).trim() !== "").length;
+}
+
+function initializeTextProcessState(node) {
+    if (!isShaobkjTextProcessNode(node) || !node.widgets) return false;
+    const startWidget = findWidgetByNames(node, ["计数开始"]);
+    const endWidget = findWidgetByNames(node, ["计数结束"]);
+    const stateWidget = findWidgetByNames(node, ["当前执行编号状态"]);
+    if (!startWidget || !endWidget || !stateWidget) return false;
+    const maxLines = getTextProcessMaxLineCount(node);
+    const startValue = Math.max(0, Number(startWidget.value ?? 0));
+    const nextState = maxLines > 0 ? Math.min(startValue, maxLines - 1) : 0;
+    let changed = false;
+    if (Number(endWidget.value ?? 0) !== maxLines) {
+        endWidget.value = maxLines;
+        changed = true;
+    }
+    if (stateWidget.value !== nextState) {
+        stateWidget.value = nextState;
+        changed = true;
+    }
+    node.__shaobkjTextProcessLastText = getTextProcessSourceText(node);
+    node.__shaobkjTextProcessInitialized = true;
+    node.__shaobkjTextProcessListEnabled = Boolean(findWidgetByNames(node, ["列表"])?.value);
+    node.__shaobkjTextProcessLastStartValue = startValue;
+    if (changed) {
+        node.onResize?.(node.size);
+        node.setDirtyCanvas(true, true);
     }
     return changed;
 }
@@ -254,6 +376,89 @@ function setupImageSaveCustomSizeMode(node) {
     return changed;
 }
 
+function setupTextProcessListMode(node) {
+    if (!isShaobkjTextProcessNode(node)) return false;
+    if (!node.widgets || !Array.isArray(node.outputs) || node.outputs.length < 3) return false;
+    const listWidget = findWidgetByNames(node, ["列表"]);
+    const startWidget = findWidgetByNames(node, ["计数开始"]);
+    const endWidget = findWidgetByNames(node, ["计数结束"]);
+    const modeWidget = findWidgetByNames(node, ["mode"]);
+    const stateWidget = findWidgetByNames(node, ["当前执行编号状态"]);
+    const textWidget = findWidgetByNames(node, ["文本"]);
+    if (!listWidget) return false;
+    const totalOutput = node.outputs[1];
+    const currentOutput = node.outputs[2];
+    if (!totalOutput || !currentOutput) return false;
+    const enabled = Boolean(listWidget.value);
+    const totalOutputName = enabled ? "列表行总数" : "列表行总数（已禁用）";
+    const currentOutputName = enabled ? "当前执行编号" : "当前执行编号（已禁用）";
+    let changed = false;
+    const startValue = Number(startWidget?.value ?? 0);
+    if (totalOutput.name !== totalOutputName) {
+        totalOutput.name = totalOutputName;
+        changed = true;
+    }
+    if (totalOutput.label !== totalOutputName) {
+        totalOutput.label = totalOutputName;
+        changed = true;
+    }
+    if (totalOutput.disabled !== !enabled) {
+        totalOutput.disabled = !enabled;
+        changed = true;
+    }
+    if (currentOutput.name !== currentOutputName) {
+        currentOutput.name = currentOutputName;
+        changed = true;
+    }
+    if (currentOutput.label !== currentOutputName) {
+        currentOutput.label = currentOutputName;
+        changed = true;
+    }
+    if (currentOutput.disabled !== !enabled) {
+        currentOutput.disabled = !enabled;
+        changed = true;
+    }
+    if (startWidget) {
+        changed = setWidgetDisabledState(startWidget, !enabled) || changed;
+    }
+    if (modeWidget) {
+        changed = setWidgetDisabledState(modeWidget, !enabled) || changed;
+        if (modeWidget.label !== "计数模式") {
+            modeWidget.label = "计数模式";
+            changed = true;
+        }
+    }
+    if (endWidget) {
+        changed = setWidgetDisabledState(endWidget, !enabled) || changed;
+    }
+    if (stateWidget) {
+        changed = setWidgetHiddenState(stateWidget, true) || changed;
+    }
+    const previousEnabled = node.__shaobkjTextProcessListEnabled;
+    const previousStartValue = node.__shaobkjTextProcessLastStartValue;
+    if (stateWidget && startWidget) {
+        const stateValue = Number(stateWidget.value ?? 0);
+        const shouldInitializeState = node.__shaobkjTextProcessInitialized !== true
+            || previousEnabled !== enabled
+            || previousStartValue !== startValue;
+        if (!Number.isNaN(startValue) && (shouldInitializeState || stateValue < startValue)) {
+            stateWidget.value = startValue;
+            changed = true;
+        }
+    }
+    node.__shaobkjTextProcessInitialized = true;
+    node.__shaobkjTextProcessListEnabled = enabled;
+    node.__shaobkjTextProcessLastStartValue = startValue;
+    if (typeof node.__shaobkjTextProcessLastText !== "string") {
+        node.__shaobkjTextProcessLastText = getTextProcessSourceText(node);
+    }
+    if (changed) {
+        node.onResize?.(node.size);
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
+}
+
 function setupLoadImageListLocalization(node) {
     if (!isShaobkjLoadImageListNode(node) || !node.widgets) return false;
     let changed = false;
@@ -279,6 +484,49 @@ function setupLoadImageListLocalization(node) {
         }
         if (name === "sort_method" && w.options && Array.isArray(w.options.values)) {
             const nextValues = ["数字顺序", "字母顺序", "修改时间"];
+            const current = String(w.value ?? "");
+            const mapped = sortValueMap[current] || current;
+            const sameValues = w.options.values.length === nextValues.length && w.options.values.every((v, i) => v === nextValues[i]);
+            if (!sameValues) {
+                w.options.values = nextValues;
+                changed = true;
+            }
+            if (nextValues.includes(mapped) && w.value !== mapped) {
+                w.value = mapped;
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
+}
+
+function setupLoadBatchImagesLocalization(node) {
+    if (!isShaobkjLoadBatchImagesNode(node) || !node.widgets) return false;
+    let changed = false;
+    const labelMap = {
+        directory: "目录路径",
+        image_load_cap: "加载数量上限",
+        start_index: "起始索引",
+        load_always: "每次重载",
+        sort_method: "排序方式",
+    };
+    const sortValueMap = {
+        numerical: "数字顺序",
+        alphabetical: "字母顺序",
+        date: "修改时间",
+    };
+    const nextValues = ["数字顺序", "字母顺序", "修改时间"];
+    for (const w of node.widgets) {
+        const name = typeof w.name === "string" ? w.name : "";
+        const nextLabel = labelMap[name];
+        if (nextLabel && w.label !== nextLabel) {
+            w.label = nextLabel;
+            changed = true;
+        }
+        if (name === "sort_method" && w.options && Array.isArray(w.options.values)) {
             const current = String(w.value ?? "");
             const mapped = sortValueMap[current] || current;
             const sameValues = w.options.values.length === nextValues.length && w.options.values.every((v, i) => v === nextValues[i]);
@@ -521,6 +769,50 @@ function setupLinkWidget(node) {
     }
     const nodeType = node?.type || "";
     const nodeTitle = node?.title || "";
+    if (isShaobkjTextProcessNode(node)) {
+        const legacyIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (legacyIndex >= 0) {
+            node.widgets.splice(legacyIndex, 1);
+        }
+        const index = node.widgets.findIndex(w => w.name === "初始化");
+        if (index === -1) {
+            const newWidget = node.addWidget("button", "初始化", "Init", () => {
+                initializeTextProcessState(node);
+            });
+            newWidget.name = "初始化";
+            newWidget.label = "⟳ 初始化";
+            newWidget.tooltip = "按当前文本重新计算去空行后的最大列表行数，并初始化计数";
+            newWidget.serialize = false;
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        const widget = node.widgets[index];
+        const isLast = index === node.widgets.length - 1;
+        const isCorrect = widget.type === "button" && widget.label === "⟳ 初始化" && widget.callback;
+        widget.callback = () => {
+            initializeTextProcessState(node);
+        };
+        widget.tooltip = "按当前文本重新计算去空行后的最大列表行数，并初始化计数";
+        if (isCorrect && isLast) {
+            return false;
+        }
+        if (isCorrect && !isLast) {
+            node.widgets.splice(index, 1);
+            node.widgets.push(widget);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        node.widgets.splice(index, 1);
+        const newWidget = node.addWidget("button", "初始化", "Init", () => {
+            initializeTextProcessState(node);
+        });
+        newWidget.name = "初始化";
+        newWidget.label = "⟳ 初始化";
+        newWidget.tooltip = "按当前文本重新计算去空行后的最大列表行数，并初始化计数";
+        newWidget.serialize = false;
+        node.setDirtyCanvas(true, true);
+        return true;
+    }
     if (nodeType === "Shaobkj_FreeColor" || (typeof nodeTitle === "string" && nodeTitle.includes("自由调色"))) {
         const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
         if (existingIndex >= 0) {
@@ -772,7 +1064,15 @@ app.registerExtension({
                     setupLongSideWidget(node);
                     setupUploadButtonLabel(node);
                     setupLoadImageListLocalization(node);
+                    setupLoadBatchImagesLocalization(node);
                     setupNanoBananaEditingMode(node);
+                    setupTextProcessListMode(node);
+                    if (isShaobkjTextProcessNode(node)) {
+                        const currentSourceText = getTextProcessSourceText(node);
+                        if (node.__shaobkjTextProcessLastText !== currentSourceText) {
+                            initializeTextProcessState(node);
+                        }
+                    }
                     syncSeedControl(node);
                     sanitizeNumericWidgets(node);
                     if (shouldManageDynamicInputsByNode(node)) {
@@ -784,6 +1084,7 @@ app.registerExtension({
             }
         };
         setTimeout(tick, 200);
+        window.setInterval(tick, 400);
 
         import("/scripts/api.js").then(({ api }) => {
             api.addEventListener("shaobkj.llm.warning", (evt) => {
@@ -803,6 +1104,25 @@ app.registerExtension({
                 } else {
                     alert(msg);
                 }
+            });
+            api.addEventListener("shaobkj.node_feedback", (evt) => {
+                const detail = evt && evt.detail ? evt.detail : null;
+                const nodeId = detail && detail.node_id ? String(detail.node_id) : "";
+                const widgetName = detail && detail.widget_name ? String(detail.widget_name) : "";
+                const value = detail ? detail.value : undefined;
+                const node = app?.graph?._nodes_by_id?.[nodeId];
+                if (!node || !Array.isArray(node.widgets)) {
+                    return;
+                }
+                const widget = node.widgets.find((w) => w && w.name === widgetName);
+                if (!widget) {
+                    return;
+                }
+                widget.value = value;
+                node.setDirtyCanvas?.(true, true);
+            });
+            api.addEventListener("shaobkj.add_queue", async () => {
+                await app.queuePrompt(0, 1);
             });
         }).catch(() => {
         });
@@ -838,8 +1158,11 @@ app.registerExtension({
                     setupLongSideWidget(this);
                     setupUploadButtonLabel(this);
                     setupLoadImageListLocalization(this);
+                    setupLoadBatchImagesLocalization(this);
                     setupNanoBananaEditingMode(this);
                     setupImageSaveCustomSizeMode(this);
+                    setupTextProcessListMode(this);
+                    initializeTextProcessState(this);
                     syncSeedControl(this);
                     sanitizeNumericWidgets(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
@@ -877,6 +1200,8 @@ app.registerExtension({
                 setTimeout(() => {
                     setupNanoBananaEditingMode(this);
                     setupImageSaveCustomSizeMode(this);
+                    setupTextProcessListMode(this);
+                    setupLoadBatchImagesLocalization(this);
                     if (needsDynamicInputs) {
                         manageInputs(this);
                     } else {
@@ -890,8 +1215,22 @@ app.registerExtension({
             const onWidgetChanged = nodeType.prototype.onWidgetChanged;
             nodeType.prototype.onWidgetChanged = function(name, value, oldValue, widget) {
                 const r = onWidgetChanged ? onWidgetChanged.apply(this, arguments) : undefined;
+                if (name === "计数开始") {
+                    const stateWidget = findWidgetByNames(this, ["当前执行编号状态"]);
+                    if (stateWidget && stateWidget.value !== value) {
+                        stateWidget.value = value;
+                    }
+                }
+                if (name === "文本") {
+                    const textValue = String(value ?? "");
+                    if (this.__shaobkjTextProcessLastText !== textValue) {
+                        initializeTextProcessState(this);
+                    }
+                }
                 setupNanoBananaEditingMode(this);
                 setupImageSaveCustomSizeMode(this);
+                setupTextProcessListMode(this);
+                setupLoadBatchImagesLocalization(this);
                 return r;
             };
         }
