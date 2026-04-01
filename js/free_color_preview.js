@@ -25,6 +25,22 @@ const SLIDER_WIDGETS = new Set([
     "强度",
     "遮罩羽化",
 ]);
+const SNAPSHOT_WIDGETS = [
+    TARGET_COLOR_WIDGET_NAME,
+    "色相",
+    "饱和度",
+    "亮度",
+    "对比度",
+    "色温",
+    "色调偏移",
+    "红通道",
+    "绿通道",
+    "蓝通道",
+    "强度",
+    "遮罩羽化",
+    "反转遮罩",
+    PRESET_WIDGET_NAME,
+];
 const PRESET_PARAM_DEFAULTS = {
     目标颜色: "全部",
     色相: 0,
@@ -315,6 +331,54 @@ function installRealtimeHooks(node) {
     }
 }
 
+function buildWidgetSnapshot(node) {
+    const snapshot = {};
+    for (const name of SNAPSHOT_WIDGETS) {
+        const widget = getWidgetByName(node, name);
+        snapshot[name] = widget ? widget.value : undefined;
+    }
+    return snapshot;
+}
+
+function syncWidgetSnapshot(node) {
+    node.__shaobkjFreeColorWidgetSnapshot = buildWidgetSnapshot(node);
+}
+
+function snapshotEqual(left, right) {
+    for (const name of SNAPSHOT_WIDGETS) {
+        if ((left ? left[name] : undefined) !== (right ? right[name] : undefined)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function handleSnapshotDrivenSync(node) {
+    if (!node) {
+        return;
+    }
+    const previous = node.__shaobkjFreeColorWidgetSnapshot;
+    const current = buildWidgetSnapshot(node);
+    if (!previous) {
+        node.__shaobkjFreeColorWidgetSnapshot = current;
+        return;
+    }
+    const presetChanged = previous[PRESET_WIDGET_NAME] !== current[PRESET_WIDGET_NAME];
+    if (presetChanged) {
+        const presetWidget = getWidgetByName(node, PRESET_WIDGET_NAME);
+        if (presetWidget) {
+            handlePresetSelection(node, presetWidget, current[PRESET_WIDGET_NAME]);
+            syncWidgetSnapshot(node);
+            return;
+        }
+    }
+    if (!snapshotEqual(previous, current)) {
+        syncPresetState(node);
+        scheduleLocalPreview(node);
+        syncWidgetSnapshot(node);
+    }
+}
+
 function applyPreviewToNode(node, detail) {
     const outputSrc = detail?.image;
     const baseSrc = detail?.base_image || outputSrc;
@@ -361,6 +425,7 @@ function applyPreviewToNode(node, detail) {
         }
         installRealtimeHooks(node);
         ensureNodeHeight(node);
+        syncWidgetSnapshot(node);
     };
     baseImg.src = baseSrc;
 }
@@ -872,6 +937,7 @@ app.registerExtension({
             enforceSliderWidgets(this);
             syncPresetState(this);
             installRealtimeHooks(this);
+            syncWidgetSnapshot(this);
             return r;
         };
 
@@ -883,6 +949,7 @@ app.registerExtension({
             enforceSliderWidgets(this);
             syncPresetState(this);
             installRealtimeHooks(this);
+            syncWidgetSnapshot(this);
             this.setDirtyCanvas(true, true);
             return r;
         };
@@ -893,6 +960,7 @@ app.registerExtension({
             ensurePresetWidget(this);
             enforceSliderWidgets(this);
             syncPresetState(this);
+            syncWidgetSnapshot(this);
             return r;
         };
 
@@ -907,6 +975,7 @@ app.registerExtension({
         const onDrawBackground = nodeType.prototype.onDrawBackground;
         nodeType.prototype.onDrawBackground = function (ctx) {
             const r = onDrawBackground ? onDrawBackground.apply(this, arguments) : undefined;
+            handleSnapshotDrivenSync(this);
             if (this.flags?.collapsed) {
                 return r;
             }
