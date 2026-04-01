@@ -95,12 +95,13 @@ function ensureNodeHeight(node) {
     if (!node) {
         return;
     }
-    if (!node.__shaobkjFreeColorBaseHeight) {
-        node.__shaobkjFreeColorBaseHeight = node.size ? node.size[1] : 200;
-    }
-    const minHeight = node.__shaobkjFreeColorBaseHeight + PREVIEW_HEIGHT + PREVIEW_PADDING * 2;
-    if (node.size && node.size[1] < minHeight) {
-        node.size[1] = minHeight;
+    const computedSize = typeof node.computeSize === "function" ? node.computeSize() : null;
+    const computedHeight = Array.isArray(computedSize) ? Number(computedSize[1]) : NaN;
+    const baseHeight = Number.isFinite(computedHeight) && computedHeight > 0 ? computedHeight : (node.size ? node.size[1] : 200);
+    const targetHeight = Math.round(baseHeight + PREVIEW_HEIGHT + PREVIEW_PADDING * 2);
+    if (node.size && Math.abs(node.size[1] - targetHeight) > 1) {
+        node.size[1] = targetHeight;
+        node.onResize?.(node.size);
     }
 }
 
