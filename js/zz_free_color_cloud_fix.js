@@ -4,10 +4,7 @@ const EXTENSION_NAME = "Shaobkj.FreeColorCloudFix";
 const NODE_TYPE = "Shaobkj_FreeColor";
 const PREVIEW_HEIGHT = 220;
 const PREVIEW_PADDING = 10;
-const DEBUG_LINE_HEIGHT = 14;
-const DEBUG_BLOCK_HEIGHT = DEBUG_LINE_HEIGHT * 3 + 8;
 const SYNC_POLL_MS = 120;
-const DEBUG_VERSION = "zz-fix-2026-04-01-1";
 const PRESET_WIDGET_NAME = "一键恢复";
 const TARGET_COLOR_WIDGET_NAME = "目标颜色";
 const PRESET_OPTION_DEFAULT = "默认";
@@ -259,7 +256,7 @@ function ensureNodeHeight(node) {
     if (!node.__shaobkjFreeColorCloudFixBaseHeight) {
         node.__shaobkjFreeColorCloudFixBaseHeight = node.size ? node.size[1] : 200;
     }
-    const minHeight = node.__shaobkjFreeColorCloudFixBaseHeight + PREVIEW_HEIGHT + PREVIEW_PADDING * 2 + DEBUG_BLOCK_HEIGHT;
+    const minHeight = node.__shaobkjFreeColorCloudFixBaseHeight + PREVIEW_HEIGHT + PREVIEW_PADDING * 2;
     if (node.size && node.size[1] < minHeight) {
         node.size[1] = minHeight;
     }
@@ -538,34 +535,6 @@ function handleSnapshotDrivenSync(node) {
     }
 }
 
-function getDebugLines(node) {
-    const invertMask = parseWidgetBoolean(getWidgetValue(node, ["反转遮罩", "invert_mask"], false));
-    return [
-        `前端: ${DEBUG_VERSION}`,
-        `反转遮罩: ${invertMask ? "true" : "false"}`,
-        `预设状态: ${getCurrentPresetName(node) || PRESET_OPTION_DEFAULT}`,
-    ];
-}
-
-function drawDebugOverlay(node, ctx) {
-    if (!ctx || node.flags?.collapsed) {
-        return;
-    }
-    ensureNodeHeight(node);
-    const contentWidth = node.size[0] - PREVIEW_PADDING * 2;
-    const debugTop = node.size[1] - PREVIEW_PADDING - PREVIEW_HEIGHT - DEBUG_BLOCK_HEIGHT;
-    const lines = getDebugLines(node);
-    ctx.save();
-    ctx.fillStyle = "#0f1117";
-    ctx.fillRect(PREVIEW_PADDING, debugTop, contentWidth, DEBUG_BLOCK_HEIGHT);
-    ctx.fillStyle = "#9fb3c8";
-    ctx.font = "12px sans-serif";
-    for (let i = 0; i < lines.length; i += 1) {
-        ctx.fillText(lines[i], PREVIEW_PADDING + 6, debugTop + 16 + i * DEBUG_LINE_HEIGHT);
-    }
-    ctx.restore();
-}
-
 function startGlobalSyncLoop() {
     if (window.__shaobkjFreeColorCloudFixLoopStarted) {
         return;
@@ -627,7 +596,6 @@ app.registerExtension({
         nodeType.prototype.onDrawBackground = function (ctx) {
             const r = onDrawBackground ? onDrawBackground.apply(this, arguments) : undefined;
             handleSnapshotDrivenSync(this);
-            drawDebugOverlay(this, ctx);
             return r;
         };
     },
