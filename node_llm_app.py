@@ -30,7 +30,7 @@ class Shaobkj_LLM_App:
             "required": {
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
-                "模型选择": (["gemini-2.5-flash", "gemini-3-pro-preview"], {"default": "gemini-2.5-flash", "tooltip": "模型选择；推荐：gemini-2.5-flash"}),
+                "模型选择": (["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"], {"default": "gemini-2.5-flash", "tooltip": "模型选择；推荐：gemini-2.5-flash"}),
                 "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
                 "系统指令": ("STRING", {"default": "你是高效的AI提示词生成大师。请根据用户输入生成可直接执行的方案或内容，结构清晰，直接输出提示词，不要有任何废话。", "multiline": True, "tooltip": "系统级指令；推荐：默认内容"}),
                 "用户输入": ("STRING", {"default": "", "multiline": True, "tooltip": "用户输入内容；推荐：清晰具体"}),
@@ -180,7 +180,7 @@ class Shaobkj_NanoBanana_Prompt:
             "required": {
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key"}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址"}),
-                "模型选择": (["gemini-2.5-flash", "gemini-3-pro-preview"], {"default": "gemini-2.5-flash", "tooltip": "模型选择"}),
+                "模型选择": (["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"], {"default": "gemini-2.5-flash", "tooltip": "模型选择"}),
                 "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理"}),
                 "用户输入": ("STRING", {"default": "", "multiline": True, "tooltip": "描述你想生成的画面，例如：制作一张xx品牌香水的展示海报"}),
                 "任务类型": (["生成模式 (Generation)", "编辑模式 (Editing)"], {"default": "生成模式 (Generation)", "tooltip": "选择生成提示词还是编辑指令"}),
