@@ -101,13 +101,12 @@ GROUPED_CONCURRENT_BUFFER = {}
 GROUPED_CONCURRENT_BUFFER_LOCK = threading.Lock()
 GROUPED_CONCURRENT_IDLE_SECONDS = 0.8
 
-def run_grouped_concurrent_batches(unique_id, batches, max_workers, interval):
-    total_batches = len(batches)
-    total_tasks = sum(len(batch) for batch in batches)
+def run_grouped_concurrent_tasks(tasks, max_workers, interval):
+    total_tasks = len(tasks)
     if total_tasks <= 0:
         return
 
-    print(f"[ComfyUI-shaobkj] [Grouped-Concurrent] 检测到上游已完成，开始发送 {total_tasks} 组任务。")
+    print(f"[ComfyUI-shaobkj] [Grouped-Concurrent] 检测到上游已完成，开始发送 {total_tasks} 组任务。", flush=True)
 
     success_count = 0
     fail_count = 0
@@ -115,8 +114,9 @@ def run_grouped_concurrent_batches(unique_id, batches, max_workers, interval):
     failure_reasons = []
     lock = threading.Lock()
 
-    def on_task_done(fut, tid, batch_index):
+    def on_task_done(fut, tid):
         nonlocal success_count, fail_count, completed_count
+
         try:
             fut.result()
             is_success = True
@@ -135,33 +135,29 @@ def run_grouped_concurrent_batches(unique_id, batches, max_workers, interval):
                 failure_reasons.append(f"{tid}: {error_msg}")
                 status_str = f"失败，原因: {error_msg}"
 
-            batch_info = f" | 批次 {batch_index}/{total_batches}" if total_batches > 1 else ""
-            print(f"[ComfyUI-shaobkj-BG] [Grouped-Concurrent] 进度: {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count}{batch_info} | 任务 {tid} {status_str}")
+            print(f"[ComfyUI-shaobkj-BG] [Grouped-Concurrent] 进度: {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count} | 任务 {tid} {status_str}", flush=True)
 
             if completed_count == total_tasks:
                 summary = f"[ComfyUI-shaobkj-BG] [Grouped-Concurrent] 任务已全部完成。总计: {total_tasks} | 成功: {success_count} | 失败: {fail_count}"
                 if fail_count > 0:
                     summary += f" | 失败详情: {'; '.join(failure_reasons)}"
-                print(summary)
+                print(summary, flush=True)
 
-    for batch_index, batch_tasks in enumerate(batches, start=1):
-        if total_batches > 1:
-            print(f"[ComfyUI-shaobkj-BG] [Grouped-Concurrent] 开始发送第 {batch_index}/{total_batches} 批，批内任务数: {len(batch_tasks)}")
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = []
-            for task_data in batch_tasks:
-                future = executor.submit(run_concurrent_task_internal, task_data)
-                future.add_done_callback(lambda f, t=task_data["task_id"], b=batch_index: on_task_done(f, t, b))
-                futures.append(future)
-            for future in futures:
-                try:
-                    future.result()
-                except Exception:
-                    pass
-        if batch_index < total_batches and interval > 0:
-            time.sleep(interval)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        for i, task_data in enumerate(tasks):
+            if interval > 0 and i > 0:
+                time.sleep(interval)
+            future = executor.submit(run_concurrent_task_internal, task_data)
+            future.add_done_callback(lambda f, t=task_data["task_id"]: on_task_done(f, t))
+            futures.append(future)
+        for future in futures:
+            try:
+                future.result()
+            except Exception:
+                pass
 
-def schedule_grouped_concurrent_flush(unique_id, batch_group_size, max_workers, interval):
+def schedule_grouped_concurrent_flush(unique_id, total_output_count, max_workers, interval):
     with GROUPED_CONCURRENT_BUFFER_LOCK:
         state = GROUPED_CONCURRENT_BUFFER.setdefault(unique_id, {"tasks": [], "version": 0})
         version = state["version"]
@@ -178,8 +174,10 @@ def schedule_grouped_concurrent_flush(unique_id, batch_group_size, max_workers, 
         if not tasks_to_send:
             return
 
-        batches = [tasks_to_send[i:i + batch_group_size] for i in range(0, len(tasks_to_send), batch_group_size)]
-        run_grouped_concurrent_batches(unique_id, batches, max_workers, interval)
+        if total_output_count > 0:
+            tasks_to_send = tasks_to_send[:total_output_count]
+
+        run_grouped_concurrent_tasks(tasks_to_send, max_workers, interval)
 
     t = threading.Thread(target=delayed_flush)
     t.daemon = True
@@ -1164,7 +1162,7 @@ class Shaobkj_GroupedConcurrentImageEdit:
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"}),
                 "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例", "tooltip": "输出画面比例；推荐：原图1比例"}),
                 "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式", "tooltip": "API 返回内容处理方式；推荐：智能模式"}),
-                "出图数量": ("INT", {"default": 5, "min": 1, "max": 999999, "step": 1, "tooltip": "每累计多少组图片+提示词后发送一批；推荐：5"}),
+                "出图数量": ("INT", {"default": 5, "min": 1, "max": 999999, "step": 1, "tooltip": "最终发送的组任务总数/生成图像总数；推荐：5"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
                 "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)", "tooltip": "批次对齐策略；推荐：循环补全(Max)"}),
@@ -1202,7 +1200,7 @@ class Shaobkj_GroupedConcurrentImageEdit:
         prompts_val = 提示词
         aspect_ratio_val = get_first_list_value(图片比例)
         accept_mode_val = get_first_list_value(接收模式)
-        batch_group_size = max(1, int(get_first_list_value(出图数量, 5)))
+        output_count_val = max(1, int(get_first_list_value(出图数量, 5)))
         save_path_val = get_first_list_value(保存路径)
         long_side_val = int(get_first_list_value(kwargs.get("输入图像-长边设置", [1280])))
         seed_val = int(get_first_list_value(seed, 0))
@@ -1303,7 +1301,7 @@ class Shaobkj_GroupedConcurrentImageEdit:
             state["version"] += 1
 
         max_workers = max_workers_val if max_workers_val > 0 else 1000
-        schedule_grouped_concurrent_flush(unique_id_val, batch_group_size, max_workers, submit_interval_val)
+        schedule_grouped_concurrent_flush(unique_id_val, output_count_val, max_workers, submit_interval_val)
 
         generated_ids = [task["task_id"] for task in task_list]
         status_list = ["Buffered" for _ in generated_ids]

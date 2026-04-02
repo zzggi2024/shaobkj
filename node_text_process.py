@@ -33,7 +33,7 @@ class Shaobkj_Text_Process:
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
     FUNCTION = "process_text"
     RETURN_TYPES = ("STRING", "INT", "INT")
-    RETURN_NAMES = ("文本", "列表行总数", "当前执行编号")
+    RETURN_NAMES = ("文本", "输出列表数", "当前执行编号")
     OUTPUT_IS_LIST = (True, False, False)
 
     @classmethod
@@ -43,7 +43,7 @@ class Shaobkj_Text_Process:
                 "文本": ("STRING", {"default": "", "multiline": True, "tooltip": "输入待处理文本"}),
                 "模式选择": (["去空行", "去字符", "去空行+去字符"], {"default": "去空行", "tooltip": "文本处理模式；可选同时生效"}),
                 "去除内容": ("STRING", {"default": "", "multiline": True, "placeholder": "去除内容，多个用英文逗号,隔开", "tooltip": "去字符模式下生效；多个用英文逗号,隔开；支持：去除开头编号"}),
-                "列表": ("BOOLEAN", {"default": False, "label_on": "开启", "label_off": "关闭", "tooltip": "开启后输出列表形式，并输出列表行总数"}),
+                "列表": ("BOOLEAN", {"default": False, "label_on": "开启", "label_off": "关闭", "tooltip": "开启后输出列表形式，并输出列表数"}),
                 "计数开始": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "计数结束": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "mode": ("BOOLEAN", {"default": True, "label_on": "触发", "label_off": "不触发", "tooltip": "是否按编号自动继续触发队列"}),
@@ -90,6 +90,7 @@ class Shaobkj_Text_Process:
 
         result_list = result.split("\n") if result != "" else []
         total_count = len(result_list) if list_mode else 0
+        output_count = 0
         current_index = 0
         output_list = result_list
 
@@ -98,6 +99,7 @@ class Shaobkj_Text_Process:
             if end_value <= 0:
                 end_value = total_count
             end_value = min(max(end_value, start_value + 1), total_count)
+            output_count = max(0, end_value - start_value)
             max_index = end_value - 1
             current_index = min(max(start_value, current_state), max_index)
             _send_text_process_feedback(unique_id, "当前执行编号状态", current_index)
@@ -114,6 +116,6 @@ class Shaobkj_Text_Process:
             _send_text_process_feedback(unique_id, "当前执行编号状态", 0)
 
         if list_mode:
-            return (output_list, total_count, current_index)
+            return (output_list, output_count, current_index)
 
         return ([result], ExecutionBlocker(None), ExecutionBlocker(None))

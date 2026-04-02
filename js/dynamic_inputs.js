@@ -395,7 +395,7 @@ function setupTextProcessListMode(node) {
     const currentOutput = node.outputs[2];
     if (!totalOutput || !currentOutput) return false;
     const enabled = Boolean(listWidget.value);
-    const totalOutputName = enabled ? "列表行总数" : "列表行总数（已禁用）";
+    const totalOutputName = enabled ? "输出列表数" : "输出列表数（已禁用）";
     const currentOutputName = enabled ? "当前执行编号" : "当前执行编号（已禁用）";
     let changed = false;
     const startValue = Number(startWidget?.value ?? 0);
