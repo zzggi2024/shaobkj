@@ -65,6 +65,126 @@ def get_closest_aspect_ratio(width, height):
             
     return closest_ratio
 
+def get_first_list_value(value, default=None):
+    if isinstance(value, list) and len(value) > 0:
+        return value[0]
+    return value if value is not None else default
+
+def flatten_generic_values(value):
+    flat_list = []
+    if isinstance(value, list):
+        for item in value:
+            flat_list.extend(flatten_generic_values(item))
+    else:
+        flat_list.append(value)
+    return flat_list
+
+def tensor_value_to_pil_list(value):
+    pil_images = []
+    if isinstance(value, list):
+        for item in value:
+            pil_images.extend(tensor_value_to_pil_list(item))
+    elif isinstance(value, torch.Tensor):
+        if value.dim() == 4:
+            for i in range(value.shape[0]):
+                pil_images.append(Image.fromarray(np.clip(255. * value[i].cpu().numpy(), 0, 255).astype(np.uint8)))
+        elif value.dim() == 3:
+            pil_images.append(Image.fromarray(np.clip(255. * value.cpu().numpy(), 0, 255).astype(np.uint8)))
+    return pil_images
+
+def normalize_image_rounds(value):
+    if isinstance(value, list):
+        return [tensor_value_to_pil_list(item) for item in value]
+    return [tensor_value_to_pil_list(value)]
+
+GROUPED_CONCURRENT_BUFFER = {}
+GROUPED_CONCURRENT_BUFFER_LOCK = threading.Lock()
+GROUPED_CONCURRENT_IDLE_SECONDS = 0.8
+
+def run_grouped_concurrent_batches(unique_id, batches, max_workers, interval):
+    total_batches = len(batches)
+    total_tasks = sum(len(batch) for batch in batches)
+    if total_tasks <= 0:
+        return
+
+    print(f"[ComfyUI-shaobkj] [Grouped-Concurrent] 检测到上游已完成，开始发送 {total_tasks} 组任务。")
+
+    success_count = 0
+    fail_count = 0
+    completed_count = 0
+    failure_reasons = []
+    lock = threading.Lock()
+
+    def on_task_done(fut, tid, batch_index):
+        nonlocal success_count, fail_count, completed_count
+        try:
+            fut.result()
+            is_success = True
+            error_msg = None
+        except Exception as e:
+            is_success = False
+            error_msg = str(e)
+
+        with lock:
+            completed_count += 1
+            if is_success:
+                success_count += 1
+                status_str = "完成"
+            else:
+                fail_count += 1
+                failure_reasons.append(f"{tid}: {error_msg}")
+                status_str = f"失败，原因: {error_msg}"
+
+            batch_info = f" | 批次 {batch_index}/{total_batches}" if total_batches > 1 else ""
+            print(f"[ComfyUI-shaobkj-BG] [Grouped-Concurrent] 进度: {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count}{batch_info} | 任务 {tid} {status_str}")
+
+            if completed_count == total_tasks:
+                summary = f"[ComfyUI-shaobkj-BG] [Grouped-Concurrent] 任务已全部完成。总计: {total_tasks} | 成功: {success_count} | 失败: {fail_count}"
+                if fail_count > 0:
+                    summary += f" | 失败详情: {'; '.join(failure_reasons)}"
+                print(summary)
+
+    for batch_index, batch_tasks in enumerate(batches, start=1):
+        if total_batches > 1:
+            print(f"[ComfyUI-shaobkj-BG] [Grouped-Concurrent] 开始发送第 {batch_index}/{total_batches} 批，批内任务数: {len(batch_tasks)}")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for task_data in batch_tasks:
+                future = executor.submit(run_concurrent_task_internal, task_data)
+                future.add_done_callback(lambda f, t=task_data["task_id"], b=batch_index: on_task_done(f, t, b))
+                futures.append(future)
+            for future in futures:
+                try:
+                    future.result()
+                except Exception:
+                    pass
+        if batch_index < total_batches and interval > 0:
+            time.sleep(interval)
+
+def schedule_grouped_concurrent_flush(unique_id, batch_group_size, max_workers, interval):
+    with GROUPED_CONCURRENT_BUFFER_LOCK:
+        state = GROUPED_CONCURRENT_BUFFER.setdefault(unique_id, {"tasks": [], "version": 0})
+        version = state["version"]
+
+    def delayed_flush():
+        time.sleep(GROUPED_CONCURRENT_IDLE_SECONDS)
+        with GROUPED_CONCURRENT_BUFFER_LOCK:
+            current_state = GROUPED_CONCURRENT_BUFFER.get(unique_id)
+            if not current_state or current_state["version"] != version:
+                return
+            tasks_to_send = list(current_state["tasks"])
+            current_state["tasks"].clear()
+
+        if not tasks_to_send:
+            return
+
+        batches = [tasks_to_send[i:i + batch_group_size] for i in range(0, len(tasks_to_send), batch_group_size)]
+        run_grouped_concurrent_batches(unique_id, batches, max_workers, interval)
+
+    t = threading.Thread(target=delayed_flush)
+    t.daemon = True
+    t.start()
+
 # ----------------------------------------------------------------------------
 # Background Worker (Async Sender Logic)
 # ----------------------------------------------------------------------------
@@ -1020,6 +1140,176 @@ class Shaobkj_ConcurrentImageEdit_Sender:
         
         return (generated_ids, status_list)
 
+class Shaobkj_GroupedConcurrentImageEdit:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
+        return {
+            "required": {
+                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "编辑描述，支持多行；推荐：每行一条提示词"}),
+                "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
+                "模型选择": (
+                    [
+                        "gemini-3-pro-image-preview",
+                        "gemini-3.1-flash-image-preview",
+                        "智能加载",
+                    ],
+                    {"default": "gemini-3-pro-image-preview", "tooltip": "模型选择或智能加载；推荐：gemini-3-pro-image-preview"},
+                ),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
+                "分辨率": (["1k", "2k", "4k"], {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"}),
+                "图片比例": (["Free", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21", "原图1比例"], {"default": "原图1比例", "tooltip": "输出画面比例；推荐：原图1比例"}),
+                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式", "tooltip": "API 返回内容处理方式；推荐：智能模式"}),
+                "出图数量": ("INT", {"default": 5, "min": 1, "max": 999999, "step": 1, "tooltip": "每累计多少组图片+提示词后发送一批；推荐：5"}),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
+                "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)", "tooltip": "批次对齐策略；推荐：循环补全(Max)"}),
+                "保存路径": ("STRING", {"default": "Shaobkj_Concurrent", "multiline": False, "tooltip": "相对输出目录的子路径；推荐：Shaobkj_Concurrent"}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)", "tooltip": "输出保存格式；推荐：JPEG (默认95%)"}),
+                "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数；推荐：5"}),
+                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交间隔(秒)；推荐：1.0"}),
+            },
+            "optional": {
+                "文件名来源": ("STRING", {"forceInput": True, "multiline": False, "dynamicPrompts": False, "tooltip": "用于输出命名的文件名来源；推荐：留空"}),
+                "image_1": ("IMAGE", {"tooltip": "输入图像1；推荐：连接参考图"}),
+                "image_2": ("IMAGE", {"tooltip": "输入图像2；推荐：可选"}),
+                "image_3": ("IMAGE", {"tooltip": "输入图像3；推荐：可选"}),
+                "image_4": ("IMAGE", {"tooltip": "输入图像4；推荐：可选"}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+            }
+        }
+
+    INPUT_IS_LIST = True
+
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("API响应", "状态")
+    FUNCTION = "submit_grouped_task"
+    CATEGORY = "🤖shaobkj-APIbox"
+    OUTPUT_NODE = True
+
+    def submit_grouped_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 出图数量, 保存路径, seed, **kwargs):
+        api_key_val = get_first_list_value(API密钥)
+        api_url_val = get_first_list_value(API地址)
+        model_val = get_first_list_value(模型选择)
+        use_proxy_val = get_first_list_value(使用系统代理)
+        resolution_val = get_first_list_value(分辨率)
+        prompts_val = 提示词
+        aspect_ratio_val = get_first_list_value(图片比例)
+        accept_mode_val = get_first_list_value(接收模式)
+        batch_group_size = max(1, int(get_first_list_value(出图数量, 5)))
+        save_path_val = get_first_list_value(保存路径)
+        long_side_val = int(get_first_list_value(kwargs.get("输入图像-长边设置", [1280])))
+        seed_val = int(get_first_list_value(seed, 0))
+        batch_align_val = get_first_list_value(kwargs.get("Batch对齐方式", ["循环补全(Max)"]))
+        submit_interval_val = float(get_first_list_value(kwargs.get("并发间隔", [1.0]), 1.0))
+        max_workers_val = int(get_first_list_value(kwargs.get("最大并发数", [5]), 5))
+        save_format_val = get_first_list_value(kwargs.get("保存格式", ["JPEG (默认95%)"]))
+        filename_source_val = kwargs.get("文件名来源", None)
+        unique_id_val = str(get_first_list_value(kwargs.get("unique_id", "")) or "grouped_concurrent_default")
+
+        if not api_key_val or str(api_key_val).strip() == "":
+            raise ValueError("❌ 错误：API Key 不能为空")
+        if not api_url_val or str(api_url_val).strip() == "":
+            raise ValueError("❌ 错误：API 地址不能为空")
+
+        base_task_id = f"grouped_{int(time.time())}_{random.randint(1000,9999)}"
+        base_data = {
+            "api_key": api_key_val,
+            "api_url": api_url_val,
+            "model": model_val,
+            "use_proxy": use_proxy_val,
+            "resolution": resolution_val,
+            "aspect_ratio": aspect_ratio_val,
+            "accept_mode": accept_mode_val,
+            "subject_text": "",
+            "long_side": long_side_val,
+            "wait_time": 0,
+            "seed": seed_val,
+            "save_path": save_path_val,
+            "save_format": save_format_val,
+        }
+
+        normalized_inputs = {}
+        for key, value in kwargs.items():
+            if key in {"unique_id", "文件名来源", "输入图像-长边设置", "Batch对齐方式", "并发间隔", "最大并发数", "保存格式"}:
+                continue
+            if key.startswith("image_"):
+                normalized_inputs[key] = normalize_image_rounds(value)
+
+        sorted_keys = sorted(normalized_inputs.keys())
+
+        prompts = []
+        for item in flatten_generic_values(prompts_val):
+            if item is not None:
+                prompts.append(str(item))
+        if not prompts:
+            prompts = [""]
+
+        filename_list = []
+        if filename_source_val:
+            for item in flatten_generic_values(filename_source_val):
+                if isinstance(item, str) and "\n" in item:
+                    filename_list.extend([x.strip() for x in item.split("\n") if x.strip()])
+                elif item is not None and str(item).strip() != "":
+                    filename_list.append(str(item))
+
+        batch_sizes = [len(prompts)]
+        for image_rounds in normalized_inputs.values():
+            batch_sizes.append(len(image_rounds))
+        if filename_list:
+            batch_sizes.append(len(filename_list))
+
+        if not batch_sizes:
+            final_batch_size = 1
+        elif batch_align_val == "裁切对齐(Min)":
+            final_batch_size = min(batch_sizes)
+        else:
+            final_batch_size = max(batch_sizes)
+
+        if final_batch_size <= 0:
+            print("[ComfyUI-shaobkj] [Grouped-Concurrent] 未收到可提交的数据，跳过本次执行。")
+            return ([], [])
+
+        task_list = []
+        for i in range(final_batch_size):
+            sub_task_id = f"{base_task_id}_{i}"
+            sub_data = base_data.copy()
+            sub_data["task_id"] = sub_task_id
+            sub_data["prompt"] = prompts[i % len(prompts)] if prompts else ""
+            sub_data["tensor_images"] = []
+
+            if filename_list:
+                sub_data["output_filename"] = filename_list[i % len(filename_list)]
+
+            for key in sorted_keys:
+                image_rounds = normalized_inputs[key]
+                if not image_rounds:
+                    continue
+                round_images = image_rounds[i % len(image_rounds)]
+                if round_images:
+                    sub_data["tensor_images"].extend(round_images)
+
+            task_list.append(sub_data)
+
+        with GROUPED_CONCURRENT_BUFFER_LOCK:
+            state = GROUPED_CONCURRENT_BUFFER.setdefault(unique_id_val, {"tasks": [], "version": 0})
+            state["tasks"].extend(task_list)
+            state["version"] += 1
+
+        max_workers = max_workers_val if max_workers_val > 0 else 1000
+        schedule_grouped_concurrent_flush(unique_id_val, batch_group_size, max_workers, submit_interval_val)
+
+        generated_ids = [task["task_id"] for task in task_list]
+        status_list = ["Buffered" for _ in generated_ids]
+
+        return (generated_ids, status_list)
+
 
 # ----------------------------------------------------------------------------
 # Node C: Load Batch Images From Path
@@ -1631,6 +1921,7 @@ class Shaobkj_Fixed_Seed:
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
+    "Shaobkj_GroupedConcurrentImageEdit": Shaobkj_GroupedConcurrentImageEdit,
     "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
     "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
     "Shaobkj_Image_Save": Shaobkj_Image_Save,
@@ -1640,6 +1931,7 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
+    "Shaobkj_GroupedConcurrentImageEdit": "🧩组合并发",
     "Shaobkj_Load_Image_Path": "🤖加载图像",
     "Shaobkj_Load_Batch_Images": "🤖批量加载图像(路径)",
     "Shaobkj_Image_Save": "🤖图像保存",

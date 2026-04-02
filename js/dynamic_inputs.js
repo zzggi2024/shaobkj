@@ -10,6 +10,8 @@ const DYNAMIC_NODES = [
     "🤖 Shaobkj -Veo视频",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "🤖并发-编辑-图像驱动",
+    "Shaobkj_GroupedConcurrentImageEdit",
+    "🧩组合并发",
     "Shaobkj_APINode_Batch",
     "🤖并发-编辑-文本驱动",
     "Shaobkj_LLM_App",
@@ -23,6 +25,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
     "Shaobkj_ConcurrentImageEdit_Sender",
+    "Shaobkj_GroupedConcurrentImageEdit",
     "Shaobkj_LLM_App",
     "Shaobkj_NanoBanana_Prompt",
     "Shaobkj_Load_Image_Path",
@@ -59,7 +62,9 @@ const THEME_CONFIG = {
 
     // ⚡ 极速系列 (效率与工具) - Matrix Green
     "Shaobkj_ConcurrentImageEdit_Sender": { color: "#00C853", bgcolor: "#003311" },
-    "🤖并发-编辑-图像驱动": { color: "#00C853", bgcolor: "#003311" }
+    "🤖并发-编辑-图像驱动": { color: "#00C853", bgcolor: "#003311" },
+    "Shaobkj_GroupedConcurrentImageEdit": { color: "#00C853", bgcolor: "#003311" },
+    "🧩组合并发": { color: "#00C853", bgcolor: "#003311" }
 };
 
 const DEFAULT_THEME = { color: "#006600", bgcolor: "#003300" }; // Fallback
