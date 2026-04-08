@@ -6,8 +6,10 @@ const DYNAMIC_NODES = [
     "🤖图像生成",
     "Shaobkj_Sora_Video", 
     "Shaobkj_Veo_Video",
+    "Shaobkj_SD20_Video",
     "🤖 Shaobkj -Sora视频",
     "🤖 Shaobkj -Veo视频",
+    "🎬 SD_2.0视频",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "🤖并发-编辑-图像驱动",
     "Shaobkj_GroupedConcurrentImageEdit",
@@ -24,6 +26,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode_Batch",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
+    "Shaobkj_SD20_Video",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "Shaobkj_GroupedConcurrentImageEdit",
     "Shaobkj_LLM_App",
@@ -55,8 +58,10 @@ const THEME_CONFIG = {
     // 🎬 导演系列 (视频生成) - Future Blue
     "Shaobkj_Sora_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj_Veo_Video": { color: "#0091EA", bgcolor: "#001A2E" },
+    "Shaobkj_SD20_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "🤖 Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "🤖 Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
+    "🎬 SD_2.0视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
 
@@ -82,7 +87,7 @@ function getThemeForNode(node) {
     
     // Fallback logic for aliases not explicitly in map but having known keywords
     if (title) {
-        if (title.includes("Sora") || title.includes("Veo")) return THEME_CONFIG["Shaobkj_Sora_Video"];
+        if (title.includes("Sora") || title.includes("Veo") || title.includes("SD_2.0")) return THEME_CONFIG["Shaobkj_Sora_Video"];
         if (title.includes("反推") || title.includes("编辑")) return THEME_CONFIG["Shaobkj_ConcurrentImageEdit"];
         if (title.includes("图像生成")) return THEME_CONFIG["Shaobkj_APINode"];
         if (title.includes("桥接")) return THEME_CONFIG["Shaobkj_HTTP_Load_Image"];
