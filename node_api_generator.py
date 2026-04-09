@@ -641,15 +641,23 @@ class Shaobkj_APINode:
             t_progress.join(timeout=1.0)
             
             error_msg = str(e)
+            
+            # Prepare task link message if task_id exists
+            task_link_msg = ""
+            if "task_id" in locals() and task_id:
+                task_link_msg = f"\n\n任务已提交到服务端 (任务ID: {task_id})。\n您可以稍后通过此地址查询结果: {url}/{task_id}"
+                
             if "504" in error_msg:
-                raise RuntimeError("请求超时 (504 Gateway Time-out)。服务器处理时间过长，请稍后重试。")
+                raise RuntimeError(f"请求超时 (504 Gateway Time-out)。服务器处理时间过长，请稍后重试。{task_link_msg}")
             if "Total execution time exceeded limit" in error_msg:
-                raise RuntimeError(f"等待超时 ({int(等待时间)}秒)。任务执行时间超过了设定的'等待时间'，已被强制终止。")
+                raise RuntimeError(f"等待超时 ({int(等待时间)}秒)。任务执行时间超过了设定的'等待时间'，已被强制终止。{task_link_msg}")
             if "Read timed out" in error_msg or "Connect timed out" in error_msg:
-                 raise RuntimeError(f"网络连接超时。网络响应慢，或者您设定的等待时间 ({int(等待时间)}秒) 不足以完成任务。请检查网络或增加等待时间。")
+                 raise RuntimeError(f"网络连接超时。网络响应慢，或者您设定的等待时间 ({int(等待时间)}秒) 不足以完成任务。请检查网络或增加等待时间。{task_link_msg}")
+            if "图像生成超时" in error_msg:
+                 raise RuntimeError(f"{error_msg}{task_link_msg}")
             if "Expecting value: line 1 column 1" in error_msg:
-                raise RuntimeError(f"请求失败 (数据不完整)。服务器连接不稳定，接收到的数据不完整。请增加等待时间或检查网络。")
-            raise RuntimeError(f"请求失败: {error_msg}")
+                raise RuntimeError(f"请求失败 (数据不完整)。服务器连接不稳定，接收到的数据不完整。请增加等待时间或检查网络。{task_link_msg}")
+            raise RuntimeError(f"请求失败: {error_msg}{task_link_msg}")
             
         finally:
             # Always stop progress thread and set to 100% on finish
