@@ -39,6 +39,7 @@ from .shaobkj_shared import (
     tensor_to_pil,
     crop_image_to_ratio,
     detect_subject_bbox,
+    reserve_output_file_path,
 )
 
 def get_closest_aspect_ratio(width, height):
@@ -686,14 +687,6 @@ def run_concurrent_task_internal(data):
                 save_params = {"format": "WEBP", "lossless": True}
                 ext = ".webp"
 
-            # Determine Filename
-            custom_filename = data.get("output_filename")
-            if custom_filename:
-                base_name = os.path.splitext(os.path.basename(str(custom_filename)))[0]
-                filename = f"{base_name}{ext}"
-            else:
-                filename = f"concurrent_edit_{int(time.time())}_{random.randint(1000,9999)}{ext}"
-            
             # Determine output directory
             out_dir = folder_paths.get_output_directory()
             if save_path_input and isinstance(save_path_input, str) and save_path_input.strip():
@@ -708,18 +701,7 @@ def run_concurrent_task_internal(data):
                 except Exception as e:
                     print(f"[ComfyUI-shaobkj] [Concurrent-Sender] Failed to create custom dir {custom_dir}, using default. Error: {e}")
 
-            out_path = os.path.join(out_dir, filename)
-            
-            # Check for overwrite and append suffix if needed
-            counter = 1
-            original_out_path = out_path
-            original_base_name = os.path.splitext(filename)[0]
-            
-            while os.path.exists(out_path):
-                new_filename = f"{original_base_name}_{counter}{ext}"
-                out_path = os.path.join(out_dir, new_filename)
-                filename = new_filename # Update filename variable for logging/return
-                counter += 1
+            filename, out_path = reserve_output_file_path(out_dir, data.get("output_filename"), ext)
             
             final_img.save(out_path, **save_params)
             
@@ -839,7 +821,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
                 "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交间隔(秒)；推荐：1.0"}),
             },
             "optional": {
-                 "文件名来源": ("STRING", {"forceInput": True, "multiline": False, "dynamicPrompts": False, "tooltip": "用于输出命名的文件名来源；推荐：留空"}),
+                 "文件名来源": ("STRING", {"forceInput": True, "multiline": False, "dynamicPrompts": False, "tooltip": "用于输出命名；留空默认 image；同名自动追加序号"}),
                  "image_1": ("IMAGE", {"tooltip": "输入图像1；推荐：连接参考图"}),
                  "image_2": ("IMAGE", {"tooltip": "输入图像2；推荐：可选"}),
                  "image_3": ("IMAGE", {"tooltip": "输入图像3；推荐：可选"}),
@@ -1177,7 +1159,7 @@ class Shaobkj_GroupedConcurrentImageEdit:
                 "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交间隔(秒)；推荐：1.0"}),
             },
             "optional": {
-                "文件名来源": ("STRING", {"forceInput": True, "multiline": False, "dynamicPrompts": False, "tooltip": "用于输出命名的文件名来源；推荐：留空"}),
+                "文件名来源": ("STRING", {"forceInput": True, "multiline": False, "dynamicPrompts": False, "tooltip": "用于输出命名；留空默认 image；同名自动追加序号"}),
                 "image_1": ("IMAGE", {"tooltip": "输入图像1；推荐：连接参考图"}),
                 "image_2": ("IMAGE", {"tooltip": "输入图像2；推荐：可选"}),
                 "image_3": ("IMAGE", {"tooltip": "输入图像3；推荐：可选"}),
@@ -1576,11 +1558,6 @@ class Shaobkj_Image_Save:
         extension = fmt_label if fmt_label in valid_formats else "png"
         ext = f".{extension}"
 
-        base_name = str(文件名).strip() if 文件名 is not None else ""
-        base_name = os.path.splitext(os.path.basename(base_name))[0]
-        if not base_name:
-            base_name = "image"
-
         filenames = []
         out_paths = []
         warning_sent = False
@@ -1663,13 +1640,7 @@ class Shaobkj_Image_Save:
                     warning_sent = True
                 pil_img = pil_img.convert("RGB")
 
-            filename = f"{base_name}{ext}"
-            out_path = os.path.join(out_dir, filename)
-            counter = 1
-            while os.path.exists(out_path):
-                filename = f"{base_name}_{counter}{ext}"
-                out_path = os.path.join(out_dir, filename)
-                counter += 1
+            filename, out_path = reserve_output_file_path(out_dir, 文件名, ext)
             if extension in ("jpg", "jpeg"):
                 pil_img.save(out_path, format="JPEG", quality=int(质量), dpi=(int(dpi), int(dpi)))
             elif extension == "png":

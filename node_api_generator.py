@@ -34,6 +34,7 @@ from .shaobkj_shared import (
     resize_pil_long_side,
     crop_image_to_ratio,
     detect_subject_bbox,
+    reserve_output_file_path,
 )
 from comfy.utils import ProgressBar
 
@@ -1059,14 +1060,6 @@ def run_batch_generation_task(data):
                 save_params = {"format": "WEBP", "lossless": True}
                 ext = ".webp"
 
-            # Determine Filename
-            custom_filename = data.get("output_filename")
-            if custom_filename:
-                base_name = os.path.splitext(os.path.basename(str(custom_filename)))[0]
-                filename = f"{base_name}{ext}"
-            else:
-                filename = f"batch_gen_{int(time.time())}_{random.randint(1000,9999)}{ext}"
-            
             # Determine output directory
             out_dir = folder_paths.get_output_directory()
             if save_path_input and isinstance(save_path_input, str) and save_path_input.strip():
@@ -1079,16 +1072,7 @@ def run_batch_generation_task(data):
                 except Exception as e:
                     print(f"[ComfyUI-shaobkj] [Concurrent-Batch] Failed to create custom dir {custom_dir}: {e}")
 
-            out_path = os.path.join(out_dir, filename)
-            
-            # Check for overwrite
-            counter = 1
-            original_base_name = os.path.splitext(filename)[0]
-            while os.path.exists(out_path):
-                new_filename = f"{original_base_name}_{counter}{ext}"
-                out_path = os.path.join(out_dir, new_filename)
-                filename = new_filename
-                counter += 1
+            filename, out_path = reserve_output_file_path(out_dir, data.get("output_filename"), ext)
             
             final_img.save(out_path, **save_params)
             
@@ -1150,7 +1134,7 @@ class Shaobkj_APINode_Batch:
                 "主体文本": ("STRING", {"default": "", "multiline": False, "tooltip": "主体识别裁切关键词；推荐：留空"}),
                 "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
                 "出图数量": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1, "tooltip": "单次提交的任务总数/循环次数；推荐：1"}),
-                "指定文件名": ("STRING", {"default": "", "multiline": False, "placeholder": "为空则自动命名，输入则自动添加序号", "tooltip": "为空自动命名，可自定义前缀；推荐：留空"}),
+                "指定文件名": ("STRING", {"default": "", "multiline": False, "placeholder": "为空则默认 image，同名自动追加序号", "tooltip": "为空默认 image；同名自动追加序号；推荐：留空"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
                 "Batch拆分模式": ("BOOLEAN", {"default": True, "tooltip": "是否拆分批次提交；推荐：开启"}),
                 "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)", "tooltip": "批次对齐策略；推荐：循环补全(Max)"}),
@@ -1320,7 +1304,7 @@ class Shaobkj_APINode_Batch:
             fn_prefix = filename_prefix_list[i % len(filename_prefix_list)]
             out_fn = None
             if fn_prefix and str(fn_prefix).strip():
-                out_fn = f"{str(fn_prefix).strip()}_{i+1}"
+                out_fn = str(fn_prefix).strip()
 
             task_data = {
                 "task_id": sub_task_id,

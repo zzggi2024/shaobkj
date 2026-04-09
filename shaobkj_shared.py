@@ -28,6 +28,7 @@ if os.path.exists(CONFIG_PATH):
 # --- Async Task Manager ---
 ASYNC_TASK_FILE = os.path.join(os.path.dirname(__file__), "shaobkj_async_history.json")
 async_task_lock = threading.Lock()
+output_file_lock = threading.Lock()
 
 def _read_async_tasks():
     if not os.path.exists(ASYNC_TASK_FILE): return {}
@@ -78,6 +79,32 @@ def get_config_value(key, env_key, default):
     if key in CONFIG:
         return CONFIG[key]
     return default
+
+
+def resolve_output_base_name(filename, default="image"):
+    base_name = str(filename).strip() if filename is not None else ""
+    base_name = os.path.splitext(os.path.basename(base_name))[0]
+    if not base_name:
+        base_name = str(default).strip() if default is not None else ""
+    if not base_name:
+        base_name = "image"
+    return base_name
+
+
+def reserve_output_file_path(output_dir, filename, extension, default_base_name="image"):
+    ext = str(extension).strip() if extension is not None else ""
+    if ext and not ext.startswith("."):
+        ext = f".{ext}"
+    base_name = resolve_output_base_name(filename, default_base_name)
+    with output_file_lock:
+        final_filename = f"{base_name}{ext}"
+        output_path = os.path.join(output_dir, final_filename)
+        counter = 1
+        while os.path.exists(output_path):
+            final_filename = f"{base_name}_{counter}{ext}"
+            output_path = os.path.join(output_dir, final_filename)
+            counter += 1
+    return final_filename, output_path
 
 
 def tensor_to_pil(image):
