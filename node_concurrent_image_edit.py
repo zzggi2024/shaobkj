@@ -1375,7 +1375,7 @@ class Shaobkj_Load_Batch_Images:
                 "image_load_cap": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "限制加载数量，0为不限制；推荐：0"}),
                 "start_index": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "从第几个文件开始加载；推荐：0"}),
                 "load_always": ("BOOLEAN", {"default": False, "label_on": "开启", "label_off": "关闭", "tooltip": "每次运行都重新加载；推荐：关闭"}),
-                "sort_method": (["numerical", "alphabetical", "date"], {"default": "numerical", "tooltip": "文件排序方式；推荐：numerical"}),
+                "sort_method": (["数字顺序", "字母顺序", "修改时间"], {"default": "数字顺序", "tooltip": "文件排序方式；推荐：数字顺序"}),
             }
         }
 
@@ -1384,7 +1384,7 @@ class Shaobkj_Load_Batch_Images:
     FUNCTION = "load_images"
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
 
-    def load_images(self, directory, image_load_cap=0, start_index=0, load_always=False, sort_method="numerical"):
+    def load_images(self, directory, image_load_cap=0, start_index=0, load_always=False, sort_method="数字顺序"):
         folder_path = directory
         if not folder_path or not os.path.exists(folder_path):
              raise ValueError(f"❌ 错误：文件夹路径不存在: {folder_path}")
@@ -1402,7 +1402,16 @@ class Shaobkj_Load_Batch_Images:
         except Exception as e:
             raise ValueError(f"❌ 错误：读取文件夹失败: {e}")
 
-        if sort_method == "numerical":
+        sort_mode = {
+            "数字顺序": "numerical",
+            "字母顺序": "alphabetical",
+            "修改时间": "date",
+            "numerical": "numerical",
+            "alphabetical": "alphabetical",
+            "date": "date",
+        }.get(str(sort_method), "numerical")
+
+        if sort_mode == "numerical":
              def natural_sort_key(s):
                  parts = re.split('([0-9]+)', s)
                  processed = []
@@ -1419,9 +1428,9 @@ class Shaobkj_Load_Batch_Images:
              except Exception as e:
                  print(f"[Shaobkj-Loader] Numerical sort failed: {e}. Fallback to default sort.")
                  file_list.sort()
-        elif sort_method == "alphabetical":
+        elif sort_mode == "alphabetical":
              file_list.sort(key=lambda x: os.path.basename(x).lower())
-        elif sort_method == "date":
+        elif sort_mode == "date":
              file_list.sort(key=lambda x: os.path.getmtime(x))
         else:
              file_list.sort()

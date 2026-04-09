@@ -33,7 +33,7 @@ class Shaobkj_LoadImageListFromDir:
         else:
             return hash(frozenset(kwargs))
 
-    def load_images(self, directory: str, image_load_cap: int = 0, start_index: int = 0, load_always=False, sort_method="numerical", include_subdirs=True):
+    def load_images(self, directory: str, image_load_cap: int = 0, start_index: int = 0, load_always=False, sort_method="数字顺序", include_subdirs=True):
         if not directory or not os.path.exists(directory):
              raise ValueError(f"❌ 错误：文件夹路径不存在: {directory}")
 
