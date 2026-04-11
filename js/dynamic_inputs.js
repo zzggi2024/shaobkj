@@ -188,6 +188,12 @@ function isShaobkjTextProcessNode(node) {
     return t === "Shaobkj_Text_Process" || (typeof title === "string" && title.includes("文本处理"));
 }
 
+function isShaobkjLoopTriggerNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    return t === "Shaobkj_Loop_Trigger" || (typeof title === "string" && title.includes("循环触发"));
+}
+
 function findWidgetByNames(node, names) {
     if (!node?.widgets || !Array.isArray(node.widgets)) return null;
     for (const name of names) {
@@ -822,6 +828,15 @@ function setupLinkWidget(node) {
         newWidget.serialize = false;
         node.setDirtyCanvas(true, true);
         return true;
+    }
+    if (isShaobkjLoopTriggerNode(node)) {
+        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
     }
     if (nodeType === "Shaobkj_FreeColor" || (typeof nodeTitle === "string" && nodeTitle.includes("自由调色"))) {
         const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");

@@ -4,7 +4,7 @@ from .node_veo_video import Shaobkj_Veo_Video
 from .node_sd20_video import Shaobkj_SD20_Video
 from .node_concurrent_image_edit import Shaobkj_ConcurrentImageEdit_Sender, Shaobkj_GroupedConcurrentImageEdit, Shaobkj_Load_Image_Path, Shaobkj_Load_Batch_Images, Shaobkj_Image_Save, Shaobkj_Fixed_Seed
 from .node_llm_app import Shaobkj_LLM_App, Shaobkj_NanoBanana_Prompt
-from .node_loop import Shaobkj_ForLoop_Start, Shaobkj_ForLoop_End
+from .node_loop import Shaobkj_ForLoop_Start, Shaobkj_ForLoop_End, Shaobkj_Loop_Trigger
 from .node_load_image_list import Shaobkj_LoadImageListFromDir
 from .node_resolution_judge import Shaobkj_ResolutionJudge, Shaobkj_GetEdgeLength
 from .node_florence2_fast_prompt import Shaobkj_Load_Florence2_Model, Shaobkj_Florence2_Fast_Prompt
@@ -27,6 +27,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_LLM_App": Shaobkj_LLM_App,
     "Shaobkj_ForLoop_Start": Shaobkj_ForLoop_Start,
     "Shaobkj_ForLoop_End": Shaobkj_ForLoop_End,
+    "Shaobkj_Loop_Trigger": Shaobkj_Loop_Trigger,
     "Shaobkj_NanoBanana_Prompt": Shaobkj_NanoBanana_Prompt,
     "Shaobkj_LoadImageListFromDir": Shaobkj_LoadImageListFromDir,
     "Shaobkj_ResolutionJudge": Shaobkj_ResolutionJudge,
@@ -53,6 +54,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_LLM_App": "🤖LLM应用",
     "Shaobkj_ForLoop_Start": "🤖循环开始",
     "Shaobkj_ForLoop_End": "🤖循环结束",
+    "Shaobkj_Loop_Trigger": "🔁循环触发",
     "Shaobkj_NanoBanana_Prompt": "🤖香蕉专属提示词",
     "Shaobkj_LoadImageListFromDir": "🤖加载图像列表(路径)",
     "Shaobkj_ResolutionJudge": "🤖分辨率智能判断",
