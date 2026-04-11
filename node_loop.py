@@ -182,7 +182,7 @@ class Shaobkj_Loop_Trigger:
                 "强制循环数": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "默认跟随总数；手动填写后按该值循环"}),
                 "总数": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "初始化或自动检测后同步图片总数"}),
                 "mode": ("BOOLEAN", {"default": True, "label_on": "触发", "label_off": "不触发", "tooltip": "是否继续自动触发队列"}),
-                "当前执行编号状态": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "内部执行状态"}),
+                "当前执行编号": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "实时显示当前执行编号"}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -193,7 +193,7 @@ class Shaobkj_Loop_Trigger:
     CATEGORY = "🤖shaobkj-APIbox/Logic"
     OUTPUT_NODE = True
 
-    def execute(self, 文件夹路径, 强制循环数, 总数, mode, 当前执行编号状态, unique_id):
+    def execute(self, 文件夹路径, 强制循环数, 总数, mode, 当前执行编号, unique_id):
         scan_result = _scan_image_folder(文件夹路径)
         actual_total = int(scan_result["total"])
         stored_total = int(总数) if 总数 is not None else 0
@@ -205,7 +205,7 @@ class Shaobkj_Loop_Trigger:
         state = LOOP_TRIGGER_STATE.get(state_key, {"initialized": False})
         initialized = bool(state.get("initialized", False))
         if actual_total <= 0 or not initialized:
-            _send_loop_feedback(unique_id, "当前执行编号状态", 0)
+            _send_loop_feedback(unique_id, "当前执行编号", 0)
             return (0, actual_total)
 
         loop_total = int(强制循环数) if 强制循环数 is not None else 0
@@ -213,15 +213,15 @@ class Shaobkj_Loop_Trigger:
             loop_total = actual_total
         loop_total = max(1, loop_total)
 
-        current_value = int(当前执行编号状态) if 当前执行编号状态 is not None else 0
+        current_value = int(当前执行编号) if 当前执行编号 is not None else 0
         current_value = min(max(current_value, 0), loop_total - 1)
-        _send_loop_feedback(unique_id, "当前执行编号状态", current_value)
+        _send_loop_feedback(unique_id, "当前执行编号", current_value)
 
         if bool(mode):
             if current_value < loop_total - 1:
-                _send_loop_feedback(unique_id, "当前执行编号状态", current_value + 1)
+                _send_loop_feedback(unique_id, "当前执行编号", current_value + 1)
                 PromptServer.instance.send_sync("shaobkj.add_queue", {})
             else:
-                _send_loop_feedback(unique_id, "当前执行编号状态", 0)
+                _send_loop_feedback(unique_id, "当前执行编号", 0)
 
         return (current_value, actual_total)

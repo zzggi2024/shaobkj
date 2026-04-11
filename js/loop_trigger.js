@@ -140,7 +140,7 @@ async function syncNodeFolderState(node, options = {}) {
 		}
 		setWidgetValue(node, "总数", 0);
 		setWidgetValue(node, "强制循环数", 0);
-		setWidgetValue(node, "当前执行编号状态", 0);
+		setWidgetValue(node, "当前执行编号", 0);
 		watchedNodes.set(String(node.id), {
 			path: folderPath,
 			signature: "",
@@ -152,15 +152,15 @@ async function syncNodeFolderState(node, options = {}) {
 
 	const total = Number(result.total ?? 0);
 	const previousTotal = Number(totalWidget.value ?? 0);
-	const currentForceValue = Number(forceWidget.value ?? 0);
-	if (Number(totalWidget.value ?? 0) !== total) {
+	const totalChanged = previousTotal !== total;
+	if (totalChanged) {
 		totalWidget.value = total;
 	}
-	if (currentForceValue <= 0 || currentForceValue === previousTotal) {
+	if (totalChanged || fromInit) {
 		forceWidget.value = total;
 	}
 	if (fromInit) {
-		setWidgetValue(node, "当前执行编号状态", 0);
+		setWidgetValue(node, "当前执行编号", 0);
 	}
 
 	node.setDirtyCanvas?.(true, true);
@@ -248,9 +248,11 @@ function enhanceLoopTriggerNode(node) {
 	if (legacyEndWidgetIndex >= 0) {
 		node.widgets.splice(legacyEndWidgetIndex, 1);
 	}
-	const internalStateWidget = findWidget(node, "当前执行编号状态");
+	const internalStateWidget = findWidget(node, "当前执行编号");
 	if (internalStateWidget) {
-		setWidgetHiddenState(internalStateWidget, true);
+		internalStateWidget.options = internalStateWidget.options || {};
+		internalStateWidget.options.readOnly = true;
+		setWidgetHiddenState(internalStateWidget, false);
 	}
 
 	const existingInitButton = findWidget(node, "初始化");
