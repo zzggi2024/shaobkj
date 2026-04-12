@@ -4,6 +4,8 @@ import { api } from "../../scripts/api.js";
 const NODE_CLASS_NAME = "Shaobkj_Loop_Trigger";
 const watchedNodes = new Map();
 let pollTimer = null;
+let queueListenerBound = false;
+let feedbackListenerBound = false;
 
 function findWidget(node, name) {
 	return Array.isArray(node?.widgets) ? node.widgets.find((widget) => widget?.name === name) : null;
@@ -225,6 +227,30 @@ function startPolling() {
 	}, 2000);
 }
 
+function bindLoopTriggerEvents() {
+	if (!feedbackListenerBound) {
+		api.addEventListener("shaobkj.loop_trigger.feedback", (evt) => {
+			const detail = evt?.detail ?? null;
+			const nodeId = detail?.node_id ? String(detail.node_id) : "";
+			const widgetName = detail?.widget_name ? String(detail.widget_name) : "";
+			const value = detail?.value;
+			const node = app?.graph?._nodes_by_id?.[nodeId];
+			if (!node) {
+				return;
+			}
+			setWidgetValue(node, widgetName, value);
+		});
+		feedbackListenerBound = true;
+	}
+
+	if (!queueListenerBound) {
+		api.addEventListener("shaobkj.loop_trigger.add_queue", async () => {
+			await app.queuePrompt(0, 1);
+		});
+		queueListenerBound = true;
+	}
+}
+
 function enhanceLoopTriggerNode(node) {
 	if (node.__shaobkjLoopTriggerEnhanced) {
 		return;
@@ -315,6 +341,7 @@ function enhanceLoopTriggerNode(node) {
 app.registerExtension({
 	name: "Shaobkj.LoopTrigger",
 	async setup() {
+		bindLoopTriggerEvents();
 		startPolling();
 	},
 	async beforeRegisterNodeDef(nodeType, nodeData) {

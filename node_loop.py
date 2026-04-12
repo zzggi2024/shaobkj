@@ -86,9 +86,13 @@ def _send_loop_feedback(unique_id, widget_name, value):
     if unique_id is None:
         return
     PromptServer.instance.send_sync(
-        "shaobkj.node_feedback",
+        "shaobkj.loop_trigger.feedback",
         {"node_id": str(unique_id), "widget_name": widget_name, "value": value},
     )
+
+
+def _send_loop_add_queue():
+    PromptServer.instance.send_sync("shaobkj.loop_trigger.add_queue", {})
 
 
 @PromptServer.instance.routes.post("/shaobkj/loop_trigger/scan")
@@ -220,7 +224,7 @@ class Shaobkj_Loop_Trigger:
         if bool(mode):
             if current_value < loop_total - 1:
                 _send_loop_feedback(unique_id, "当前执行编号", current_value + 1)
-                PromptServer.instance.send_sync("shaobkj.add_queue", {})
+                _send_loop_add_queue()
             else:
                 _send_loop_feedback(unique_id, "当前执行编号", 0)
 
