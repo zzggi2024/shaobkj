@@ -22,6 +22,7 @@ import node_helpers
 import comfy
 
 from .shaobkj_shared import (
+    build_gemini_image_prompt,
     get_config_value,
     create_requests_session,
     disable_insecure_request_warnings,
@@ -364,7 +365,7 @@ def run_concurrent_task_internal(data):
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
         # Force generation instruction
-        final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
+        final_prompt = build_gemini_image_prompt(prompt, model)
         parts = [{"text": final_prompt}]
         
         image_b64_list = [] # Store for fallback

@@ -19,6 +19,7 @@ from server import PromptServer
 import torch.nn.functional as F
 
 from .shaobkj_shared import (
+    build_gemini_image_prompt,
     build_submit_timeout,
     create_requests_session,
     disable_insecure_request_warnings,
@@ -170,7 +171,7 @@ class Shaobkj_APINode:
         url = f"{gemini_base}/v1beta/models/{model}:generateContent"
 
         # Force image generation by appending instruction
-        final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
+        final_prompt = build_gemini_image_prompt(prompt, model)
         parts = [{"text": final_prompt}]
 
         # Process input images if any
@@ -748,7 +749,7 @@ def run_batch_generation_task(data):
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
         # Force generation instruction
-        final_prompt = str(prompt) + "\n\n(Generate an image based on this description)"
+        final_prompt = build_gemini_image_prompt(prompt, model)
         parts = [{"text": final_prompt}]
         
         # Handle Images (New)

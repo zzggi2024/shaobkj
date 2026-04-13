@@ -81,6 +81,37 @@ def get_config_value(key, env_key, default):
     return default
 
 
+def build_gemini_image_prompt(prompt, model, suffix="\n\n(Generate an image based on this description)"):
+    def _flatten_prompt(value):
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            parts = []
+            for item in value:
+                text = _flatten_prompt(item).strip()
+                if text:
+                    parts.append(text)
+            return "\n".join(parts)
+        return str(value)
+
+    base_prompt = _flatten_prompt(prompt)
+    model_name = str(model or "").lower()
+    suffix_text = "" if suffix is None else str(suffix)
+    suffix_count = base_prompt.count(suffix_text) if suffix_text else 0
+    final_prompt = base_prompt if suffix_count > 0 else base_prompt + suffix_text
+
+    if "gemini" in model_name and "flash" in model_name:
+        max_chars = 5000
+        final_length = len(final_prompt)
+        if final_length >= max_chars:
+            raise ValueError(
+                f"Prompt length {final_length} exceeds Gemini Flash limit {max_chars}. "
+                f"base_length={len(base_prompt)}, suffix_length={len(suffix_text)}, suffix_count={suffix_count}"
+            )
+
+    return final_prompt
+
+
 def resolve_output_base_name(filename, default="image"):
     base_name = str(filename).strip() if filename is not None else ""
     base_name = os.path.splitext(os.path.basename(base_name))[0]

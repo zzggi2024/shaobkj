@@ -182,7 +182,7 @@ class Shaobkj_Loop_Trigger:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "文件夹路径": ("STRING", {"default": "", "multiline": False, "tooltip": "图片文件夹路径；首次使用先初始化"}),
+                "文件夹路径": ("STRING", {"default": "", "multiline": False, "tooltip": "图片文件夹路径；首次运行会自动初始化，也可手动初始化"}),
                 "强制循环数": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "默认跟随总数；手动填写后按该值循环"}),
                 "总数": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "初始化或自动检测后同步图片总数"}),
                 "mode": ("BOOLEAN", {"default": True, "label_on": "触发", "label_off": "不触发", "tooltip": "是否继续自动触发队列"}),
@@ -204,13 +204,19 @@ class Shaobkj_Loop_Trigger:
 
         if actual_total != stored_total:
             _send_loop_feedback(unique_id, "总数", actual_total)
+            _send_loop_feedback(unique_id, "强制循环数", actual_total)
 
         state_key = str(unique_id)
         state = LOOP_TRIGGER_STATE.get(state_key, {"initialized": False})
         initialized = bool(state.get("initialized", False))
-        if actual_total <= 0 or not initialized:
+        if actual_total <= 0:
+            LOOP_TRIGGER_STATE[state_key] = {"initialized": False}
             _send_loop_feedback(unique_id, "当前执行编号", 0)
             return (0, actual_total)
+
+        if not initialized:
+            LOOP_TRIGGER_STATE[state_key] = {"initialized": True}
+            _send_loop_feedback(unique_id, "当前执行编号", 0)
 
         loop_total = int(强制循环数) if 强制循环数 is not None else 0
         if loop_total <= 0:
