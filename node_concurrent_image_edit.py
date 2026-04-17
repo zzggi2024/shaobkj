@@ -1,8 +1,8 @@
 import os
-import json
 import time
 import threading
 import traceback
+import hashlib
 import base64
 import io
 import random
@@ -67,6 +67,7 @@ def get_closest_aspect_ratio(width, height):
             closest_ratio = r_str
             
     return closest_ratio
+
 
 def get_first_list_value(value, default=None):
     if isinstance(value, list) and len(value) > 0:
@@ -1315,6 +1316,20 @@ class Shaobkj_Load_Image_Path:
     RETURN_NAMES = ("image", "mask", "filename")
     FUNCTION = "load_image"
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
+
+    @classmethod
+    def VALIDATE_INPUTS(s, image):
+        if not folder_paths.exists_annotated_filepath(image):
+            return f"无效图像文件: {image}"
+        return True
+
+    @classmethod
+    def IS_CHANGED(s, image):
+        image_path = folder_paths.get_annotated_filepath(image)
+        m = hashlib.sha256()
+        with open(image_path, "rb") as f:
+            m.update(f.read())
+        return m.digest().hex()
 
     def load_image(self, image):
         image_path = folder_paths.get_annotated_filepath(image)
