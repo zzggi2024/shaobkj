@@ -847,6 +847,15 @@ function setupLinkWidget(node) {
         }
         return false;
     }
+    if (nodeType === "Shaobkj_QuickMark" || (typeof nodeTitle === "string" && nodeTitle.includes("快速标记"))) {
+        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
+    }
     const index = node.widgets.findIndex(w => w.name === "API申请地址");
     const defaultUrl = "https://yhmx.work/login?expired=true";
 

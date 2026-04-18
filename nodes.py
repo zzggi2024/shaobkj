@@ -11,6 +11,7 @@ from .node_florence2_fast_prompt import Shaobkj_Load_Florence2_Model, Shaobkj_Fl
 from .node_seamless_pattern import Shaobkj_SeamlessPattern
 from .node_free_color import Shaobkj_FreeColor
 from .node_text_process import Shaobkj_Text_Process
+from .node_quick_mark import Shaobkj_QuickMark
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
@@ -37,6 +38,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_SeamlessPattern": Shaobkj_SeamlessPattern,
     "Shaobkj_FreeColor": Shaobkj_FreeColor,
     "Shaobkj_Text_Process": Shaobkj_Text_Process,
+    "Shaobkj_QuickMark": Shaobkj_QuickMark,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -64,6 +66,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_SeamlessPattern": "🎨 接回头 (四方连续)",
     "Shaobkj_FreeColor": "🎨 自由调色",
     "Shaobkj_Text_Process": "📝 文本处理",
+    "Shaobkj_QuickMark": "🏷️ 快速标记",
 }
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")
