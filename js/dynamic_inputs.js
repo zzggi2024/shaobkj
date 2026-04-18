@@ -856,6 +856,15 @@ function setupLinkWidget(node) {
         }
         return false;
     }
+    if (nodeType === "Shaobkj_FontStyleSelector" || (typeof nodeTitle === "string" && nodeTitle.includes("字体风格提示词选择器"))) {
+        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
+    }
     const index = node.widgets.findIndex(w => w.name === "API申请地址");
     const defaultUrl = "https://yhmx.work/login?expired=true";
 

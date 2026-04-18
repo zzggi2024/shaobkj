@@ -12,6 +12,7 @@ from .node_seamless_pattern import Shaobkj_SeamlessPattern
 from .node_free_color import Shaobkj_FreeColor
 from .node_text_process import Shaobkj_Text_Process
 from .node_quick_mark import Shaobkj_QuickMark
+from .node_font_style_selector import Shaobkj_FontStyleSelector
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
@@ -39,6 +40,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_FreeColor": Shaobkj_FreeColor,
     "Shaobkj_Text_Process": Shaobkj_Text_Process,
     "Shaobkj_QuickMark": Shaobkj_QuickMark,
+    "Shaobkj_FontStyleSelector": Shaobkj_FontStyleSelector,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -67,6 +69,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_FreeColor": "🎨 自由调色",
     "Shaobkj_Text_Process": "📝 文本处理",
     "Shaobkj_QuickMark": "🏷️ 快速标记",
+    "Shaobkj_FontStyleSelector": "🖋️ 字体风格提示词选择器",
 }
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")
