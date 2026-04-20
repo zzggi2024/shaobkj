@@ -124,6 +124,16 @@ function getDynamicInputSpec(node) {
     const t = node?.type || "";
     const title = node?.title || "";
     const k = `${t} ${title}`.toLowerCase();
+    if (t === "Shaobkj_SD20_Video" || (typeof title === "string" && title.includes("SD_2.0视频"))) {
+        return {
+            prefix: "参考图",
+            slotType: "IMAGE",
+            minInputs: 2,
+            maxInputs: 9,
+            legacyPrefixes: ["image_"],
+            legacyNames: ["参考图"],
+        };
+    }
     if (k.includes("video_edit") || k.includes("视频编辑")) {
         return { prefix: "video_", slotType: "VIDEO" };
     }
@@ -655,10 +665,31 @@ function manageInputs(node, onlyAdd = false) {
             node.inputs = [];
         }
 
+        if (manageSd20MultiInputs(node, onlyAdd)) {
+            return;
+        }
+
         let changed = false;
         const spec = getDynamicInputSpec(node);
         if (!spec) return;
-        const { prefix, slotType } = spec;
+        const {
+            prefix,
+            slotType,
+            minInputs = MIN_INPUTS,
+            maxInputs = Number.POSITIVE_INFINITY,
+            legacyPrefixes = [],
+            legacyNames = [],
+        } = spec;
+
+        for (let i = node.inputs.length - 1; i >= 0; i--) {
+            const inputName = String(node.inputs[i]?.name || "");
+            const isLegacyPrefix = legacyPrefixes.some((legacyPrefix) => legacyPrefix && inputName.startsWith(legacyPrefix));
+            const isLegacyName = legacyNames.includes(inputName);
+            if (isLegacyPrefix || isLegacyName) {
+                node.removeInput(i);
+                changed = true;
+            }
+        }
 
         const imageInputs = [];
         for (let i = 0; i < node.inputs.length; i++) {
@@ -687,7 +718,8 @@ function manageInputs(node, onlyAdd = false) {
             }
         }
 
-        let targetCount = Math.max(highestConnectedIndex + 1, MIN_INPUTS);
+        let targetCount = Math.max(highestConnectedIndex + 1, minInputs);
+        targetCount = Math.min(targetCount, maxInputs);
         
         for (let i = 1; i <= targetCount; i++) {
             const name = `${prefix}${i}`;
@@ -743,6 +775,10 @@ function manageInputs(node, onlyAdd = false) {
             }
         }
 
+        if (reorderSd20ReferenceInputs(node)) {
+            changed = true;
+        }
+
         if (setupLinkWidget(node)) {
             changed = true;
         }
@@ -762,13 +798,257 @@ function manageInputs(node, onlyAdd = false) {
     }
 }
 
+function manageSd20MultiInputs(node, onlyAdd = false) {
+    const nodeType = node?.type || "";
+    const nodeTitle = node?.title || "";
+    const isSd20Node = nodeType === "Shaobkj_SD20_Video" || (typeof nodeTitle === "string" && nodeTitle.includes("SD_2.0视频"));
+    if (!isSd20Node) {
+        return false;
+    }
+
+    const seriesList = [
+        { prefix: "参考图", slotType: "IMAGE", minInputs: 1, maxInputs: 9, skipIndexes: new Set([1]) },
+        { prefix: "参考视频", slotType: "VIDEO", minInputs: 1, maxInputs: 3, skipIndexes: new Set([1]) },
+        { prefix: "参考音频", slotType: "AUDIO", minInputs: 1, maxInputs: 3, skipIndexes: new Set([1]) },
+    ];
+    let changed = false;
+
+    for (let i = node.inputs.length - 1; i >= 0; i--) {
+        const inputName = String(node.inputs[i]?.name || "");
+        if (inputName.startsWith("image_") || inputName.startsWith("video_")) {
+            node.removeInput(i);
+            changed = true;
+        }
+    }
+
+    for (const series of seriesList) {
+        changed = manageNamedSeriesInputs(node, series, onlyAdd) || changed;
+    }
+
+    if (reorderSd20ReferenceInputs(node)) {
+        changed = true;
+    }
+
+    if (setupLinkWidget(node)) {
+        changed = true;
+    }
+    if (setupLongSideWidget(node)) {
+        changed = true;
+    }
+    if (setupNodeStyle(node)) {
+        changed = true;
+    }
+    if (changed) {
+        node.onResize?.(node.size);
+        node.setDirtyCanvas(true, true);
+    }
+    return true;
+}
+
+function manageNamedSeriesInputs(node, series, onlyAdd = false) {
+    if (!node?.inputs || !series) return false;
+    const {
+        prefix,
+        slotType,
+        minInputs = 1,
+        maxInputs = Number.POSITIVE_INFINITY,
+        skipIndexes = new Set(),
+    } = series;
+    let changed = false;
+
+    const seriesInputs = [];
+    for (let i = 0; i < node.inputs.length; i++) {
+        const input = node.inputs[i];
+        const name = String(input?.name || "");
+        if (/^\D+\d+$/.test(name) && name.startsWith(prefix)) {
+            seriesInputs.push(input);
+        }
+    }
+
+    seriesInputs.sort((a, b) => {
+        const idxA = parseInt(String(a.name).replace(prefix, "") || "0");
+        const idxB = parseInt(String(b.name).replace(prefix, "") || "0");
+        return idxA - idxB;
+    });
+
+    let highestConnectedIndex = 0;
+    for (const input of seriesInputs) {
+        const idx = parseInt(String(input.name).replace(prefix, "") || "0");
+        if (input.link !== null && input.link !== undefined && input.link !== -1 && idx > highestConnectedIndex) {
+            highestConnectedIndex = idx;
+        }
+    }
+
+    let targetCount = Math.max(highestConnectedIndex + 1, minInputs);
+    targetCount = Math.min(targetCount, maxInputs);
+
+    for (let i = 1; i <= targetCount; i++) {
+        if (skipIndexes.has(i)) continue;
+        const name = `${prefix}${i}`;
+        const existingIndex = node.findInputSlot ? node.findInputSlot(name) : -1;
+        if (existingIndex === -1) {
+            node.addInput(name, slotType);
+            changed = true;
+        }
+    }
+
+    if (onlyAdd) {
+        return changed;
+    }
+
+    let currentMaxIndex = 0;
+    if (seriesInputs.length > 0) {
+        const currentInputs = node.inputs
+            .filter((input) => {
+                const name = String(input?.name || "");
+                return /^\D+\d+$/.test(name) && name.startsWith(prefix);
+            })
+            .sort((a, b) => {
+                const idxA = parseInt(String(a.name).replace(prefix, "") || "0");
+                const idxB = parseInt(String(b.name).replace(prefix, "") || "0");
+                return idxA - idxB;
+            });
+        if (currentInputs.length > 0) {
+            currentMaxIndex = parseInt(String(currentInputs[currentInputs.length - 1].name || "").replace(prefix, "") || "0");
+        }
+    }
+
+    if (currentMaxIndex > targetCount) {
+        for (let i = currentMaxIndex; i > targetCount; i--) {
+            if (skipIndexes.has(i)) continue;
+            const name = `${prefix}${i}`;
+            const inputIndex = node.findInputSlot ? node.findInputSlot(name) : -1;
+            if (inputIndex !== -1) {
+                const input = node.inputs[inputIndex];
+                if (input && input.link === null) {
+                    node.removeInput(inputIndex);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    return changed;
+}
+
+function reorderSd20ReferenceInputs(node) {
+    const nodeType = node?.type || "";
+    const nodeTitle = node?.title || "";
+    const isSd20Node = nodeType === "Shaobkj_SD20_Video" || (typeof nodeTitle === "string" && nodeTitle.includes("SD_2.0视频"));
+    if (!isSd20Node || !Array.isArray(node.inputs) || node.inputs.length === 0) {
+        return false;
+    }
+
+    const oldInputs = [...node.inputs];
+    const oldNameOrder = oldInputs.map((input) => String(input?.name || ""));
+    const fixedImageNames = ["首帧", "末帧", "参考图1"];
+
+    const byName = new Map();
+    for (const input of oldInputs) {
+        const name = String(input?.name || "");
+        if (name) {
+            byName.set(name, input);
+        }
+    }
+
+    const orderedInputs = [];
+    const usedNames = new Set();
+    const pushByName = (name) => {
+        if (!byName.has(name) || usedNames.has(name)) return;
+        orderedInputs.push(byName.get(name));
+        usedNames.add(name);
+    };
+
+    for (const name of fixedImageNames) {
+        pushByName(name);
+    }
+
+    const dynamicRefInputs = oldInputs
+        .filter((input) => /^参考图\d+$/.test(String(input?.name || "")))
+        .sort((a, b) => {
+            const idxA = parseInt(String(a.name).replace("参考图", "") || "0");
+            const idxB = parseInt(String(b.name).replace("参考图", "") || "0");
+            return idxA - idxB;
+        });
+    for (const input of dynamicRefInputs) {
+        const idx = parseInt(String(input.name).replace("参考图", "") || "0");
+        if (idx <= 1) continue;
+        pushByName(String(input.name));
+    }
+
+    const dynamicVideoInputs = oldInputs
+        .filter((input) => /^参考视频\d+$/.test(String(input?.name || "")))
+        .sort((a, b) => {
+            const idxA = parseInt(String(a.name).replace("参考视频", "") || "0");
+            const idxB = parseInt(String(b.name).replace("参考视频", "") || "0");
+            return idxA - idxB;
+        });
+    for (const input of dynamicVideoInputs) {
+        pushByName(String(input.name));
+    }
+
+    const dynamicAudioInputs = oldInputs
+        .filter((input) => /^参考音频\d+$/.test(String(input?.name || "")))
+        .sort((a, b) => {
+            const idxA = parseInt(String(a.name).replace("参考音频", "") || "0");
+            const idxB = parseInt(String(b.name).replace("参考音频", "") || "0");
+            return idxA - idxB;
+        });
+    for (const input of dynamicAudioInputs) {
+        pushByName(String(input.name));
+    }
+
+    for (const input of oldInputs) {
+        const name = String(input?.name || "");
+        if (!usedNames.has(name)) {
+            orderedInputs.push(input);
+            usedNames.add(name);
+        }
+    }
+
+    const newNameOrder = orderedInputs.map((input) => String(input?.name || ""));
+    const sameOrder =
+        oldNameOrder.length === newNameOrder.length &&
+        oldNameOrder.every((name, index) => name === newNameOrder[index]);
+    if (sameOrder) {
+        return false;
+    }
+
+    node.inputs = orderedInputs;
+
+    if (node.graph?.links) {
+        const indexByName = new Map();
+        for (let i = 0; i < node.inputs.length; i++) {
+            indexByName.set(String(node.inputs[i]?.name || ""), i);
+        }
+        for (const input of node.inputs) {
+            const linkId = input?.link;
+            if (linkId == null || linkId === -1) continue;
+            const linkInfo = node.graph.links[linkId];
+            const inputName = String(input?.name || "");
+            if (linkInfo && indexByName.has(inputName)) {
+                linkInfo.target_slot = indexByName.get(inputName);
+            }
+        }
+    }
+
+    return true;
+}
+
 function cleanupDynamicInputs(node) {
     if (!node.inputs || !Array.isArray(node.inputs) || !node.inputs.length) return;
     let changed = false;
     // Iterate backwards to safely remove
     for (let i = node.inputs.length - 1; i >= 0; i--) {
         const n = node.inputs[i]?.name || "";
-        if (n.startsWith("image_") || n.startsWith("video_")) {
+        if (
+            n.startsWith("image_") ||
+            n.startsWith("video_") ||
+            n === "参考图" ||
+            /^参考图\d+$/.test(n) ||
+            /^参考视频\d+$/.test(n) ||
+            /^参考音频\d+$/.test(n)
+        ) {
             node.removeInput(i);
             changed = true;
         }
@@ -977,6 +1257,12 @@ function setupNodeStyle(node) {
         changed = true;
     }
     return changed;
+}
+
+function isSd20Node(node) {
+    const nodeType = node?.type || "";
+    const nodeTitle = node?.title || "";
+    return nodeType === "Shaobkj_SD20_Video" || (typeof nodeTitle === "string" && nodeTitle.includes("SD_2.0视频"));
 }
 
 function findWidget(node, name) {
