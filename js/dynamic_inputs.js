@@ -4,6 +4,8 @@ import { app } from "/scripts/app.js";
 const DYNAMIC_NODES = [
     "Shaobkj_APINode",
     "🤖图像生成",
+    "Shaobkj_GPTImage2_Node",
+    "🖼️ gpt-image-2 生图",
     "Shaobkj_Sora_Video", 
     "Shaobkj_Veo_Video",
     "Shaobkj_SD20_Video",
@@ -24,6 +26,7 @@ const DYNAMIC_NODES = [
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
     "Shaobkj_APINode_Batch",
+    "Shaobkj_GPTImage2_Node",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
     "Shaobkj_SD20_Video",
@@ -51,9 +54,11 @@ const THEME_CONFIG = {
     // 🔮 创世系列 (图像生成) - Electric Violet
     "Shaobkj_APINode": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_APINode_Batch": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_GPTImage2_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖并发-编辑-文本驱动": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🖼️ gpt-image-2 生图": { color: "#7D24A6", bgcolor: "#1E0A29" },
 
     // 🎬 导演系列 (视频生成) - Future Blue
     "Shaobkj_Sora_Video": { color: "#0091EA", bgcolor: "#001A2E" },
@@ -90,6 +95,7 @@ function getThemeForNode(node) {
         if (title.includes("Sora") || title.includes("Veo") || title.includes("SD_2.0")) return THEME_CONFIG["Shaobkj_Sora_Video"];
         if (title.includes("反推") || title.includes("编辑")) return THEME_CONFIG["Shaobkj_ConcurrentImageEdit"];
         if (title.includes("图像生成")) return THEME_CONFIG["Shaobkj_APINode"];
+        if (title.includes("生图")) return THEME_CONFIG["Shaobkj_APINode"];
         if (title.includes("桥接")) return THEME_CONFIG["Shaobkj_HTTP_Load_Image"];
     }
     
