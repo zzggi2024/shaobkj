@@ -1578,3 +1578,422 @@ class Shaobkj_APINode_Batch:
         status_list = ["Submitted" for _ in task_list]
         
         return (generated_ids, status_list)
+
+
+def run_gpt_image2_batch_task(data):
+    task_id_local = data.get("task_id")
+    if not task_id_local:
+        task_id_local = f"gpt_image2_{int(time.time())}_{random.randint(1000,9999)}"
+
+    print(f"[ComfyUI-shaobkj] [GPT-Image2-Batch] Starting task {task_id_local}...")
+
+    update_async_task(task_id_local, {
+        "status": "running",
+        "submitted_at": int(time.time()),
+        "prompt": data.get("prompt", "")[:50] + "...",
+        "type": "gpt_image2_batch"
+    })
+
+    try:
+        api_key = str(data.get("api_key", "")).strip()
+        api_url_base = str(data.get("api_url", "https://yhmx.work")).rstrip("/")
+        model = str(data.get("model", "gpt-image-2"))
+        use_proxy = bool(data.get("use_proxy", False))
+        resolution = str(data.get("resolution", "1k"))
+        prompt = str(data.get("prompt", "")).strip()
+        aspect_ratio = str(data.get("aspect_ratio", "1:1"))
+        response_format = str(data.get("response_format", "url"))
+        wait_time = int(data.get("wait_time", 180))
+        seed_val = int(data.get("seed", 0))
+        save_path_input = data.get("save_path", "")
+        save_format_input = data.get("save_format", "PNG (无损)")
+        long_side = int(data.get("long_side", 1280))
+        tensor_images = data.get("tensor_images", [])
+
+        if not api_key:
+            raise ValueError("API Key is required")
+        if not prompt:
+            raise ValueError("提示词不能为空")
+
+        api_base = api_url_base if api_url_base.endswith("/v1") else f"{api_url_base}/v1"
+        url = f"{api_base}/images/generations"
+        api_origin = urlparse(api_url_base).netloc
+
+        image_refs = []
+        first_image_ratio = None
+        for img in tensor_images:
+            pil_img = tensor_to_pil(img) if isinstance(img, torch.Tensor) else img
+            if pil_img is None:
+                continue
+            if first_image_ratio is None:
+                w, h = pil_img.size
+                if h > 0:
+                    first_image_ratio = float(w) / float(h)
+            data_url = encode_pil_image_data_url(pil_img, long_side_limit=long_side, quality=95)
+            if data_url:
+                image_refs.append(data_url)
+
+        api_aspect_ratio = aspect_ratio
+        if api_aspect_ratio == "原图1比例":
+            if first_image_ratio is not None:
+                api_aspect_ratio = snap_to_aspect_ratio(first_image_ratio)
+            else:
+                api_aspect_ratio = "1:1"
+
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+            "resolution": resolution,
+            "size": api_aspect_ratio,
+            "response_format": response_format,
+            "image": image_refs,
+        }
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+
+        disable_insecure_request_warnings()
+        session, proxies = create_requests_session(use_proxy)
+        submit_timeout = build_submit_timeout(wait_time)
+
+        response = post_json_with_retry(
+            session,
+            url,
+            headers=headers,
+            payload=payload,
+            timeout=submit_timeout,
+            proxies=proxies,
+            verify=False,
+        )
+        response.raise_for_status()
+
+        try:
+            res_json = response.json()
+        except (json.JSONDecodeError, ValueError) as e:
+            raise RuntimeError(f"接口返回的 JSON 无法解析: {e}")
+
+        result_images = []
+        data_list = res_json.get("data") if isinstance(res_json, dict) else None
+        if isinstance(data_list, list):
+            for item in data_list:
+                img = decode_image_from_data_item(item, session, proxies, api_key, api_origin, timeout_val=wait_time)
+                if img is not None:
+                    result_images.append(img)
+        if not result_images:
+            fallback_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=wait_time)
+            if fallback_img is not None:
+                result_images.append(fallback_img)
+        if not result_images:
+            raise RuntimeError(f"未从接口响应中解析到图像: {sanitize_text(json.dumps(res_json, ensure_ascii=False))}")
+
+        save_params = {"format": "PNG"}
+        ext = ".png"
+        if save_format_input and "JPEG" in str(save_format_input):
+            save_params = {"format": "JPEG", "quality": 95}
+            ext = ".jpg"
+        elif save_format_input and "WEBP" in str(save_format_input):
+            save_params = {"format": "WEBP", "lossless": True}
+            ext = ".webp"
+
+        out_dir = folder_paths.get_output_directory()
+        if save_path_input and isinstance(save_path_input, str) and save_path_input.strip():
+            custom_dir = save_path_input.strip()
+            if not os.path.isabs(custom_dir):
+                custom_dir = os.path.join(out_dir, custom_dir)
+            try:
+                os.makedirs(custom_dir, exist_ok=True)
+                out_dir = custom_dir
+            except Exception as e:
+                print(f"[ComfyUI-shaobkj] [GPT-Image2-Batch] Failed to create custom dir {custom_dir}: {e}")
+
+        last_filename = None
+        last_out_path = None
+        for idx, result_img in enumerate(result_images):
+            target_name = data.get("output_filename")
+            if idx > 0 and target_name:
+                target_name = f"{target_name}_{idx + 1}"
+            filename, out_path = reserve_output_file_path(out_dir, target_name, ext)
+            result_img.save(out_path, **save_params)
+            last_filename = filename
+            last_out_path = out_path
+            print(f"[ComfyUI-shaobkj] [GPT-Image2-Batch] {task_id_local}: Saved to {out_path}")
+
+        update_async_task(task_id_local, {
+            "status": "success",
+            "image_path": last_out_path,
+            "completed_at": int(time.time())
+        })
+
+        save_local_record("Concurrent_GPTImage2", task_id_local, "Success", api_url_base)
+        PromptServer.instance.send_sync("shaobkj.concurrent.success", {"task_id": task_id_local, "filename": last_filename, "path": last_out_path})
+
+        return task_id_local
+    except Exception as e:
+        err_msg = str(e)
+        print(f"[ComfyUI-shaobkj] [GPT-Image2-Batch] {task_id_local}: {err_msg}")
+        update_async_task(task_id_local, {
+            "status": "failed",
+            "error": err_msg,
+            "completed_at": int(time.time())
+        })
+        raise RuntimeError(err_msg)
+
+
+class Shaobkj_GPTImage2_Batch_Node:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
+        return {
+            "required": {
+                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "生成内容描述，支持多行；推荐：每行一条提示词"}),
+                "提示词列表": ("BOOLEAN", {"default": False, "label_on": "开启", "label_off": "关闭", "tooltip": "是否将输入视为提示词列表；开启时按行拆分，关闭时视为单条提示词"}),
+                "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
+                "模型选择": (
+                    ["gpt-image-2"],
+                    {"default": "gpt-image-2", "tooltip": "图像生成模型；推荐：gpt-image-2"},
+                ),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
+                "分辨率": (["1k", "2k", "4k"], {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"}),
+                "图片比例": (
+                    ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "原图1比例"],
+                    {"default": "原图1比例", "tooltip": "输出画面比例；推荐：原图1比例"},
+                ),
+                "返回格式": (
+                    ["url", "b64_json"],
+                    {"default": "url", "tooltip": "接口返回图像格式；推荐：url"},
+                ),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "参考图长边缩放；推荐：1280"}),
+                "等待时间": ("INT", {"default": 180, "min": 1, "max": 1000000, "tooltip": "请求等待时间(秒)；推荐：180"}),
+                "出图数量": ("INT", {"default": 1, "min": 1, "max": 1000, "step": 1, "tooltip": "单次提交的任务总数/循环次数；推荐：1"}),
+                "指定文件名": ("STRING", {"default": "", "multiline": False, "placeholder": "为空则默认 image，同名自动追加序号", "tooltip": "为空默认 image；同名自动追加序号；推荐：留空"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
+                "Batch拆分模式": ("BOOLEAN", {"default": True, "tooltip": "是否拆分批次提交；推荐：开启"}),
+                "Batch对齐方式": (["循环补全(Max)", "裁切对齐(Min)"], {"default": "循环补全(Max)", "tooltip": "批次对齐策略；推荐：循环补全(Max)"}),
+                "保存路径": ("STRING", {"default": "Shaobkj_Concurrent", "multiline": False, "tooltip": "相对输出目录的子路径；推荐：Shaobkj_Concurrent"}),
+                "保存格式": (["PNG (无损)", "JPEG (默认95%)", "WEBP (无损)"], {"default": "PNG (无损)", "tooltip": "输出保存格式；推荐：PNG (无损)"}),
+                "最大并发数": ("INT", {"default": 5, "min": 1, "max": 20, "step": 1, "tooltip": "后台最大同时执行任务数；推荐：5"}),
+                "并发间隔": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 60.0, "step": 0.1, "tooltip": "批量任务提交间隔(秒)；推荐：1.0"}),
+            },
+            "optional": {
+                "image_1": ("IMAGE", {"tooltip": "输入图像1；推荐：连接参考图"}),
+                "image_2": ("IMAGE", {"tooltip": "输入图像2；推荐：可选"}),
+                "image_3": ("IMAGE", {"tooltip": "输入图像3；推荐：可选"}),
+                "image_4": ("IMAGE", {"tooltip": "输入图像4；推荐：可选"}),
+            },
+        }
+
+    INPUT_IS_LIST = True
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("任务ID列表", "提交状态")
+    FUNCTION = "generate_images_batch"
+    CATEGORY = "🤖shaobkj-APIbox"
+    OUTPUT_NODE = True
+
+    def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 返回格式, 输入图像_长边设置=1280, 等待时间=180, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="PNG (无损)", 最大并发数=5, 并发间隔=1.0, 提示词列表=False, **kwargs):
+        def get_val(v, default=None):
+            if isinstance(v, list) and len(v) > 0:
+                return v[0]
+            return v if v is not None else default
+
+        def normalize_list_input(val):
+            flat_list = []
+            if isinstance(val, list):
+                for item in val:
+                    flat_list.extend(normalize_list_input(item))
+            else:
+                flat_list.append(val)
+            return flat_list
+
+        def normalize_image_input(val):
+            flat_list = []
+            if isinstance(val, list):
+                for item in val:
+                    if isinstance(item, list):
+                        flat_list.extend(normalize_image_input(item))
+                    elif isinstance(item, torch.Tensor):
+                        for i in range(item.shape[0]):
+                            flat_list.append(Image.fromarray(np.clip(255. * item[i].cpu().numpy(), 0, 255).astype(np.uint8)))
+            elif isinstance(val, torch.Tensor):
+                for i in range(val.shape[0]):
+                    flat_list.append(Image.fromarray(np.clip(255. * val[i].cpu().numpy(), 0, 255).astype(np.uint8)))
+            return flat_list
+
+        api_key_val = get_val(API密钥)
+        api_url_val = get_val(API地址)
+        model_val = get_val(模型选择, "gpt-image-2")
+        use_proxy_val = bool(get_val(使用系统代理, True))
+        long_side_val = int(get_val(输入图像_长边设置, 1280))
+        wait_time_val = int(get_val(等待时间, 180))
+        batch_count_val = int(get_val(出图数量, 1))
+
+        resolution_list = normalize_list_input(分辨率)
+        aspect_ratio_list = normalize_list_input(图片比例)
+        response_format_list = normalize_list_input(返回格式)
+        save_path_list = normalize_list_input(保存路径)
+        save_format_list = normalize_list_input(保存格式)
+        filename_prefix_list = normalize_list_input(指定文件名)
+        seed_list = normalize_list_input(seed)
+
+        normalized_images = {}
+        for k, v in kwargs.items():
+            if k.startswith("image_"):
+                normalized_images[k] = normalize_image_input(v)
+        sorted_image_keys = sorted(normalized_images.keys())
+
+        batch_split_val = bool(get_val(Batch拆分模式, True))
+        batch_align_val = get_val(Batch对齐方式, "循环补全(Max)")
+        submit_interval_val = float(get_val(并发间隔, 1.0))
+        max_workers_val = int(get_val(最大并发数, 5))
+
+        if not api_key_val:
+            raise ValueError("API Key is required.")
+
+        prompt_list_mode = bool(get_val(提示词列表, False))
+        prompts = []
+        raw_prompts = normalize_list_input(提示词)
+        if prompt_list_mode:
+            for p in raw_prompts:
+                if isinstance(p, str):
+                    lines = [line.strip() for line in p.splitlines() if line.strip()]
+                    prompts.extend(lines)
+        else:
+            for p in raw_prompts:
+                if isinstance(p, str) and p.strip():
+                    for _ in range(batch_count_val):
+                        prompts.append(p)
+
+        prompts = [str(p) for p in prompts if str(p).strip()]
+        if not prompts:
+            print("[ComfyUI-shaobkj] ⚠️ 提示词为空，跳过本次生成。等待上游节点输入...")
+            return ([], [])
+
+        if prompt_list_mode and batch_count_val > 1:
+            print(f"[ComfyUI-shaobkj] ℹ️ GPT-Image-2 提示词列表模式已开启 (检测到 {len(prompts)} 条提示词)。'出图数量'参数 ({batch_count_val}) 将失效，强制按提示词列表生成。")
+            batch_count_val = 1
+
+        task_list = []
+        base_task_id = f"gpt_image2_batch_{int(time.time())}_{random.randint(1000,9999)}"
+
+        if not batch_split_val:
+            final_batch_size = 1
+        else:
+            lengths = [len(prompts)]
+            if len(seed_list) > 1:
+                lengths.append(len(seed_list))
+            if len(resolution_list) > 1:
+                lengths.append(len(resolution_list))
+            if len(aspect_ratio_list) > 1:
+                lengths.append(len(aspect_ratio_list))
+            if len(response_format_list) > 1:
+                lengths.append(len(response_format_list))
+            for _, imgs in normalized_images.items():
+                if len(imgs) > 1:
+                    lengths.append(len(imgs))
+            if batch_count_val > 1:
+                lengths.append(batch_count_val)
+            if not lengths:
+                final_batch_size = 1
+            elif batch_align_val == "裁切对齐(Min)":
+                final_batch_size = min(lengths)
+            else:
+                final_batch_size = max(lengths)
+
+        print(f"[Shaobkj-GPT-Image2-Batch] Final Batch Size: {final_batch_size} (Mode: {batch_align_val}, Count: {batch_count_val})")
+
+        for i in range(final_batch_size):
+            sub_task_id = f"{base_task_id}_{i}"
+            prompt_val = prompts[i % len(prompts)]
+
+            if len(seed_list) == 1:
+                seed_current = int(seed_list[0]) + i
+            else:
+                seed_current = int(seed_list[i % len(seed_list)])
+
+            task_imgs = []
+            for key in sorted_image_keys:
+                imgs = normalized_images[key]
+                if imgs:
+                    task_imgs.append(imgs[i % len(imgs)])
+
+            fn_prefix = filename_prefix_list[i % len(filename_prefix_list)] if filename_prefix_list else ""
+            out_fn = str(fn_prefix).strip() if fn_prefix and str(fn_prefix).strip() else None
+
+            task_data = {
+                "task_id": sub_task_id,
+                "api_key": api_key_val,
+                "api_url": api_url_val,
+                "model": model_val,
+                "use_proxy": use_proxy_val,
+                "resolution": resolution_list[i % len(resolution_list)],
+                "prompt": prompt_val,
+                "aspect_ratio": aspect_ratio_list[i % len(aspect_ratio_list)],
+                "response_format": response_format_list[i % len(response_format_list)] if response_format_list else "url",
+                "wait_time": wait_time_val,
+                "seed": seed_current,
+                "save_path": save_path_list[i % len(save_path_list)] if save_path_list else "Shaobkj_Concurrent",
+                "save_format": save_format_list[i % len(save_format_list)] if save_format_list else "PNG (无损)",
+                "output_filename": out_fn,
+                "long_side": long_side_val,
+                "tensor_images": task_imgs,
+            }
+            task_list.append(task_data)
+
+        def background_batch_monitor(tasks, max_workers, split_mode, interval):
+            total_tasks = len(tasks)
+            print(f"[ComfyUI-shaobkj-BG] [GPT-Image2-Batch] Monitor started for {total_tasks} tasks. (Workers: {max_workers})")
+
+            success_count = 0
+            fail_count = 0
+            completed_count = 0
+            failure_reasons = []
+            lock = threading.Lock()
+
+            def on_task_done(fut, tid):
+                nonlocal success_count, fail_count, completed_count
+                try:
+                    fut.result()
+                    is_success = True
+                    error_msg = None
+                except Exception as e:
+                    is_success = False
+                    error_msg = str(e)
+
+                with lock:
+                    completed_count += 1
+                    if is_success:
+                        success_count += 1
+                        status_str = "完成"
+                    else:
+                        fail_count += 1
+                        failure_reasons.append(f"{tid}: {error_msg}")
+                        status_str = f"失败: {error_msg}"
+
+                    print(f"[ComfyUI-shaobkj-BG] [GPT-Image2-Batch] {completed_count}/{total_tasks} | 成功: {success_count} | 失败: {fail_count} | {tid} {status_str}")
+
+                    if completed_count == total_tasks:
+                        summary = f"[ComfyUI-shaobkj-BG] [GPT-Image2-Batch] 完成。总: {total_tasks} | 成功: {success_count} | 失败: {fail_count}"
+                        if fail_count > 0:
+                            summary += f" | 详情: {'; '.join(failure_reasons)}"
+                        print(summary)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for i, task_data in enumerate(tasks):
+                    if split_mode and interval > 0 and i > 0:
+                        time.sleep(interval)
+                    future = executor.submit(run_gpt_image2_batch_task, task_data)
+                    future.add_done_callback(lambda f, t=task_data["task_id"]: on_task_done(f, t))
+
+        max_workers = max_workers_val if max_workers_val > 0 else 1000
+        t = threading.Thread(target=background_batch_monitor, args=(task_list, max_workers, batch_split_val, submit_interval_val))
+        t.daemon = True
+        t.start()
+
+        msg = f"已提交 {len(task_list)} 个 GPT-Image-2 生成任务到后台。"
+        print(f"[ComfyUI-shaobkj] {msg}")
+
+        generated_ids = [t["task_id"] for t in task_list]
+        status_list = ["Submitted" for _ in task_list]
+        return (generated_ids, status_list)

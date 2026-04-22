@@ -1,4 +1,4 @@
-from .node_api_generator import Shaobkj_APINode, Shaobkj_APINode_Batch, Shaobkj_GPTImage2_Node
+from .node_api_generator import Shaobkj_APINode, Shaobkj_APINode_Batch, Shaobkj_GPTImage2_Node, Shaobkj_GPTImage2_Batch_Node
 from .node_video import Shaobkj_Sora_Video
 from .node_veo_video import Shaobkj_Veo_Video
 from .node_sd20_video import Shaobkj_SD20_Video
@@ -18,6 +18,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
     "Shaobkj_APINode_Batch": Shaobkj_APINode_Batch,
     "Shaobkj_GPTImage2_Node": Shaobkj_GPTImage2_Node,
+    "Shaobkj_GPTImage2_Batch_Node": Shaobkj_GPTImage2_Batch_Node,
     "Shaobkj_Sora_Video": Shaobkj_Sora_Video,
     "Shaobkj_Veo_Video": Shaobkj_Veo_Video,
     "Shaobkj_SD20_Video": Shaobkj_SD20_Video,
@@ -49,6 +50,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_APINode": "🤖图像生成",
     "Shaobkj_APINode_Batch": "🤖并发-编辑-文本驱动",
     "Shaobkj_GPTImage2_Node": "🖼️ gpt-image-2 生图",
+    "Shaobkj_GPTImage2_Batch_Node": "🖼️ gpt-image-2 文本驱动并发",
     "Shaobkj_Sora_Video": "🤖 Shaobkj -Sora视频",
     "Shaobkj_Veo_Video": "🤖 Shaobkj -Veo视频",
     "Shaobkj_SD20_Video": "🎬 SD_2.0视频",
