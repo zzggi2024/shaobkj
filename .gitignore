@@ -3,7 +3,5 @@ api_keys.yaml
 *.env
 __pycache__/
 .trae/
-Concurrent_Edit_history.txt
-Concurrent_Batch_history.txt
-Concurrent_GPTImage2_history.txt
+*_history.txt
 shaobkj_async_history.json
