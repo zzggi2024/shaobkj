@@ -119,3 +119,73 @@ class Shaobkj_Text_Process:
             return (output_list, output_count, current_index)
 
         return ([result], ExecutionBlocker(None), ExecutionBlocker(None))
+
+
+class Shaobkj_InfinitePromptJoin:
+    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    FUNCTION = "join_prompts"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("提示词",)
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "输出模式": (["普通拼接", "规范化拼接"], {"default": "普通拼接", "tooltip": "普通拼接按分隔符直接连接；规范化拼接会去空行并按行尾符号逐行输出"}),
+                "分隔符": ("STRING", {"default": ", ", "multiline": False, "tooltip": "用于连接多个提示词"}),
+                "行尾符号": ("STRING", {"default": "；", "multiline": False, "tooltip": "规范化拼接时，自动补到每行结尾"}),
+            },
+            "optional": {
+                "提示词1": ("STRING", {"forceInput": True, "default": "", "multiline": True}),
+                "提示词2": ("STRING", {"forceInput": True, "default": "", "multiline": True}),
+            },
+        }
+
+    @staticmethod
+    def _collect_prompt_items(kwargs):
+        prompt_items = []
+        prompt_keys = []
+
+        for key in kwargs.keys():
+            if isinstance(key, str) and key.startswith("提示词"):
+                suffix = key.replace("提示词", "", 1)
+                if suffix.isdigit():
+                    prompt_keys.append((int(suffix), key))
+
+        prompt_keys.sort(key=lambda item: item[0])
+
+        for _, key in prompt_keys:
+            value = kwargs.get(key)
+            if value is None:
+                continue
+            text = str(value)
+            for line in text.splitlines():
+                cleaned = line.strip()
+                if cleaned != "":
+                    prompt_items.append(cleaned)
+
+        return prompt_items
+
+    @staticmethod
+    def _normalize_prompt_items(prompt_items, line_suffix):
+        normalized_items = []
+        suffix = str(line_suffix or "").strip()
+
+        for item in prompt_items:
+            text = str(item).strip()
+            if text == "":
+                continue
+            if suffix and not text.endswith(suffix):
+                text = f"{text}{suffix}"
+            normalized_items.append(text)
+
+        return normalized_items
+
+    def join_prompts(self, 输出模式="普通拼接", 分隔符=", ", 行尾符号="；", **kwargs):
+        prompt_items = self._collect_prompt_items(kwargs)
+
+        if 输出模式 == "规范化拼接":
+            normalized_items = self._normalize_prompt_items(prompt_items, 行尾符号)
+            return ("\n".join(normalized_items),)
+
+        return (str(分隔符).join(prompt_items),)

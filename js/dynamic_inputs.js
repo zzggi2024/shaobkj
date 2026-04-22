@@ -22,6 +22,8 @@ const DYNAMIC_NODES = [
     "🤖LLM应用",
     "Shaobkj_NanoBanana_Prompt",
     "🤖香蕉专属提示词",
+    "Shaobkj_InfinitePromptJoin",
+    "✨ 无限提示词联结",
 ];
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
@@ -40,6 +42,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Fixed_Seed",
     "Shaobkj_LoadImageListFromDir",
     "Shaobkj_Text_Process",
+    "Shaobkj_InfinitePromptJoin",
 ];
 const MIN_INPUTS = 2;
 let started = false;
@@ -130,6 +133,13 @@ function getDynamicInputSpec(node) {
     const t = node?.type || "";
     const title = node?.title || "";
     const k = `${t} ${title}`.toLowerCase();
+    if (t === "Shaobkj_InfinitePromptJoin" || (typeof title === "string" && title.includes("无限提示词联结"))) {
+        return {
+            prefix: "提示词",
+            slotType: "STRING",
+            minInputs: 2,
+        };
+    }
     if (t === "Shaobkj_SD20_Video" || (typeof title === "string" && title.includes("SD_2.0视频"))) {
         return {
             prefix: "参考图",
@@ -1050,6 +1060,7 @@ function cleanupDynamicInputs(node) {
         if (
             n.startsWith("image_") ||
             n.startsWith("video_") ||
+            /^提示词\d+$/.test(n) ||
             n === "参考图" ||
             /^参考图\d+$/.test(n) ||
             /^参考视频\d+$/.test(n) ||

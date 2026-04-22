@@ -10,7 +10,7 @@ from .node_resolution_judge import Shaobkj_ResolutionJudge, Shaobkj_GetEdgeLengt
 from .node_florence2_fast_prompt import Shaobkj_Load_Florence2_Model, Shaobkj_Florence2_Fast_Prompt
 from .node_seamless_pattern import Shaobkj_SeamlessPattern
 from .node_free_color import Shaobkj_FreeColor
-from .node_text_process import Shaobkj_Text_Process
+from .node_text_process import Shaobkj_Text_Process, Shaobkj_InfinitePromptJoin
 from .node_quick_mark import Shaobkj_QuickMark
 from .node_font_style_selector import Shaobkj_FontStyleSelector
 
@@ -40,6 +40,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_SeamlessPattern": Shaobkj_SeamlessPattern,
     "Shaobkj_FreeColor": Shaobkj_FreeColor,
     "Shaobkj_Text_Process": Shaobkj_Text_Process,
+    "Shaobkj_InfinitePromptJoin": Shaobkj_InfinitePromptJoin,
     "Shaobkj_QuickMark": Shaobkj_QuickMark,
     "Shaobkj_FontStyleSelector": Shaobkj_FontStyleSelector,
 }
@@ -70,6 +71,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_SeamlessPattern": "🎨 接回头 (四方连续)",
     "Shaobkj_FreeColor": "🎨 自由调色",
     "Shaobkj_Text_Process": "📝 文本处理",
+    "Shaobkj_InfinitePromptJoin": "✨ 无限提示词联结",
     "Shaobkj_QuickMark": "🏷️ 快速标记",
     "Shaobkj_FontStyleSelector": "🖋️ 字体风格提示词选择器",
 }
