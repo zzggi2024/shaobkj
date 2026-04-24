@@ -29,6 +29,7 @@ from .shaobkj_shared import (
     pil_to_tensor,
     tensor_to_pil,
     post_json_with_retry,
+    post_with_retry,
     save_local_record,
     update_async_task,
     get_all_async_tasks,
@@ -72,6 +73,103 @@ def encode_pil_image_data_url(img, long_side_limit=1280, quality=95):
     if not b64_str:
         return None
     return f"data:image/jpeg;base64,{b64_str}"
+
+
+def build_mask_alpha(mask_tensor, target_size):
+    if mask_tensor is None or not target_size:
+        return None
+
+    mask = mask_tensor
+    if isinstance(mask, torch.Tensor):
+        if mask.dim() == 4:
+            mask = mask[0, 0] if mask.shape[1] == 1 else mask[0]
+        elif mask.dim() == 3:
+            mask = mask[0]
+        mask = mask.detach().cpu().float()
+    else:
+        mask = torch.tensor(mask, dtype=torch.float32)
+
+    if mask.dim() != 2:
+        return None
+
+    target_w, target_h = int(target_size[0]), int(target_size[1])
+    if target_w <= 0 or target_h <= 0:
+        return None
+
+    if mask.shape[0] != target_h or mask.shape[1] != target_w:
+        mask = F.interpolate(
+            mask.unsqueeze(0).unsqueeze(0),
+            size=(target_h, target_w),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0).squeeze(0)
+
+    mask = torch.clamp(mask, 0.0, 1.0)
+    return ((1.0 - mask.numpy()) * 255.0).astype(np.uint8)
+
+
+def encode_mask_tensor_data_url(mask_tensor, target_size):
+    alpha = build_mask_alpha(mask_tensor, target_size)
+    if alpha is None:
+        return None
+    target_w, target_h = int(target_size[0]), int(target_size[1])
+    rgb = np.full((target_h, target_w, 3), 255, dtype=np.uint8)
+    rgba = np.dstack([rgb, alpha])
+
+    buffered = io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buffered, format="PNG")
+    b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{b64_str}"
+
+
+def encode_pil_image_with_mask_data_url(img, mask_tensor=None, long_side_limit=1280, quality=95):
+    if img is None:
+        return None, None
+    pil_img = resize_pil_long_side(img, int(long_side_limit))
+    target_size = pil_img.size
+    alpha = build_mask_alpha(mask_tensor, target_size)
+    if alpha is None:
+        b64_str = encode_pil_image(pil_img, use_png=False, quality=quality)
+        if not b64_str:
+            return None, target_size
+        return f"data:image/jpeg;base64,{b64_str}", target_size
+
+    rgba = np.array(pil_img.convert("RGBA"), dtype=np.uint8)
+    rgba[:, :, 3] = alpha
+    buffered = io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buffered, format="PNG")
+    b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{b64_str}", target_size
+
+
+def build_edit_image_file(img, mask_tensor=None, long_side_limit=1280, quality=95, file_index=1):
+    if img is None:
+        return None, None
+    pil_img = resize_pil_long_side(img, int(long_side_limit))
+    target_size = pil_img.size
+    alpha = build_mask_alpha(mask_tensor, target_size)
+    buffered = io.BytesIO()
+    if alpha is None:
+        rgb = pil_img.convert("RGB")
+        rgb.save(buffered, format="JPEG", quality=int(quality))
+        return (f"image_{int(file_index)}.jpg", buffered.getvalue(), "image/jpeg"), target_size
+
+    rgba = np.array(pil_img.convert("RGBA"), dtype=np.uint8)
+    rgba[:, :, 3] = alpha
+    Image.fromarray(rgba, mode="RGBA").save(buffered, format="PNG")
+    return (f"image_{int(file_index)}.png", buffered.getvalue(), "image/png"), target_size
+
+
+def build_edit_mask_file(mask_tensor, target_size, file_index=1):
+    alpha = build_mask_alpha(mask_tensor, target_size)
+    if alpha is None:
+        return None
+    target_w, target_h = int(target_size[0]), int(target_size[1])
+    rgb = np.full((target_h, target_w, 3), 255, dtype=np.uint8)
+    rgba = np.dstack([rgb, alpha])
+    buffered = io.BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(buffered, format="PNG")
+    return (f"mask_{int(file_index)}.png", buffered.getvalue(), "image/png")
 
 
 def decode_image_from_data_item(data_item, session, proxies, api_key, api_origin, timeout_val=60):
@@ -249,6 +347,435 @@ class Shaobkj_GPTImage2_Node:
                 f"返回格式: {返回格式}",
                 f"返回数量: {len(result_images)}",
                 f"参考图数量: {len(image_refs)}",
+                f"seed: {int(seed)}",
+            ]
+            try:
+                w, h = result_images[0].size
+                response_lines.append(f"实际尺寸: {int(w)}x{int(h)}")
+            except Exception:
+                pass
+
+            ui_info = {"images": []}
+            return {"ui": ui_info, "result": (result_tensor, "\n".join(response_lines))}
+        finally:
+            pbar.update_absolute(100)
+
+
+class Shaobkj_GPT2Edits_Node:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
+        return {
+            "required": {
+                "提示词": ("STRING", {"multiline": False, "dynamicPrompts": True, "tooltip": "提示词内容；有图时执行编辑，无图时执行文生图"}),
+                "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
+                "模型选择": (
+                    ["gpt-image-2"],
+                    {"default": "gpt-image-2", "tooltip": "图像编辑模型；推荐：gpt-image-2"},
+                ),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
+                "分辨率": (
+                    ["1k", "2k", "4k"],
+                    {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"},
+                ),
+                "图片比例": (
+                    ["Free", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "原图1比例"],
+                    {"default": "原图1比例", "tooltip": "输出画面比例；推荐：原图1比例"},
+                ),
+                "接收模式": (
+                    ["智能模式", "URL", "B64"],
+                    {"default": "智能模式", "tooltip": "API 返回内容处理方式；推荐：智能模式"},
+                ),
+                "输出质量": (
+                    ["自动", "低", "中", "高"],
+                    {"default": "高", "tooltip": "输出质量；推荐：高"},
+                ),
+                "背景处理": (
+                    ["自动", "透明", "不透明"],
+                    {"default": "自动", "tooltip": "背景处理方式；推荐：自动"},
+                ),
+                "输入保真度": (
+                    ["高", "低"],
+                    {"default": "高", "tooltip": "图像编辑时的输入保真度；推荐：高"},
+                ),
+                "审核强度": (
+                    ["自动", "低"],
+                    {"default": "自动", "tooltip": "审核强度；推荐：自动"},
+                ),
+                "输出格式": (
+                    ["PNG", "JPEG", "WEBP"],
+                    {"default": "PNG", "tooltip": "输出格式；推荐：PNG"},
+                ),
+                "输出压缩": ("INT", {"default": 100, "min": 0, "max": 100, "tooltip": "JPEG/WEBP 压缩等级；推荐：100"}),
+                "出图数量": ("INT", {"default": 1, "min": 1, "max": 10, "tooltip": "出图数量；推荐：1"}),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
+                "等待时间": ("INT", {"default": 180, "min": 1, "max": 1000000, "tooltip": "请求等待时间(秒)；推荐：180"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
+            },
+            "optional": {
+                "image_1": ("IMAGE", {"tooltip": "输入图像1；不接图像时自动按文生图模式执行"}),
+                "mask_1": ("MASK", {"tooltip": "遮罩1；与 image_1 成对使用"}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("图像", "API响应")
+    FUNCTION = "edit_image"
+    CATEGORY = "🤖shaobkj-APIbox"
+
+    def edit_image(
+        self,
+        提示词,
+        API密钥,
+        API地址,
+        模型选择,
+        使用系统代理,
+        分辨率,
+        图片比例,
+        接收模式,
+        输出质量,
+        背景处理,
+        输入保真度,
+        审核强度,
+        输出格式,
+        输出压缩,
+        出图数量,
+        等待时间,
+        seed,
+        **kwargs,
+    ):
+        api_key = str(API密钥).strip()
+        if not api_key:
+            raise ValueError("API Key is required.")
+
+        prompt = str(提示词 or "").strip()
+        if not prompt:
+            raise ValueError("提示词不能为空。")
+
+        base_origin = str(API地址).rstrip("/")
+        api_base = base_origin if base_origin.endswith("/v1") else f"{base_origin}/v1"
+        url = f"{api_base}/images/edits"
+        api_origin = urlparse(base_origin).netloc
+        timeout_val = int(等待时间)
+        pbar = ProgressBar(100)
+        pbar.update_absolute(0)
+
+        resolution = str(分辨率)
+        aspect_ratio = str(图片比例)
+        accept_mode = str(接收模式)
+        long_side_limit = int(kwargs.get("输入图像-长边设置", 1280))
+        quality_map = {"自动": "auto", "低": "low", "中": "medium", "高": "high", "auto": "auto", "low": "low", "medium": "medium", "high": "high"}
+        background_map = {"自动": "auto", "透明": "transparent", "不透明": "opaque", "auto": "auto", "transparent": "transparent", "opaque": "opaque"}
+        moderation_map = {"自动": "auto", "低": "low", "auto": "auto", "low": "low"}
+        output_format_map = {"PNG": "png", "JPEG": "jpeg", "WEBP": "webp", "png": "png", "jpeg": "jpeg", "webp": "webp"}
+
+        image_inputs = {}
+        mask_inputs = {}
+        for k, v in kwargs.items():
+            if k.startswith("image_") and v is not None:
+                try:
+                    image_inputs[int(k.split("_")[1])] = v
+                except Exception:
+                    continue
+            if k.startswith("mask_") and v is not None:
+                try:
+                    mask_inputs[int(k.split("_")[1])] = v
+                except Exception:
+                    continue
+
+        image_indexes = sorted(image_inputs.keys())
+        first_image_ratio = None
+        first_image_size = None
+        first_mask_tensor = None
+        image_files = []
+        for idx in image_indexes:
+            pil_img = tensor_to_pil(image_inputs[idx])
+            if first_image_ratio is None:
+                w, h = pil_img.size
+                if h > 0:
+                    first_image_ratio = float(w) / float(h)
+            pair_mask = mask_inputs.get(idx)
+            upload_file, resized_size = build_edit_image_file(
+                pil_img,
+                mask_tensor=pair_mask,
+                long_side_limit=long_side_limit,
+                quality=95,
+                file_index=idx,
+            )
+            if first_image_size is None:
+                first_image_size = resized_size
+                first_mask_tensor = pair_mask
+            if upload_file:
+                image_files.append(("image", upload_file))
+        pbar.update_absolute(20)
+
+        mask_file = None
+        if first_mask_tensor is not None and first_image_size is not None:
+            mask_file = build_edit_mask_file(first_mask_tensor, first_image_size, file_index=image_indexes[0] if image_indexes else 1)
+        pbar.update_absolute(30)
+
+        api_quality = quality_map.get(str(输出质量), "high")
+        api_background = background_map.get(str(背景处理), "auto")
+        api_moderation = moderation_map.get(str(审核强度), "auto")
+        api_output_format = output_format_map.get(str(输出格式), "png")
+
+        api_aspect_ratio = aspect_ratio
+        if api_aspect_ratio == "原图1比例":
+            if first_image_ratio is not None:
+                api_aspect_ratio = snap_to_aspect_ratio(first_image_ratio)
+            else:
+                api_aspect_ratio = "1:1"
+
+        def get_target_size(res, ar):
+            target_pixel_map = {"1k": 1024 * 1024, "2k": 2048 * 2048, "4k": 8294400}
+            max_pixels = 8294400
+            min_pixels = 655360
+            max_edge = 3840
+            min_edge = 16
+            target_pixels = target_pixel_map.get(str(res).lower(), 1024 * 1024)
+            target_pixels = max(min_pixels, min(max_pixels, int(target_pixels)))
+
+            ratio_str = str(ar)
+            if ratio_str in {"Free", "free", "auto", "自动", "原图1比例"}:
+                ratio_str = api_aspect_ratio if api_aspect_ratio not in {"原图1比例", "Free", "free", "auto", "自动"} else "1:1"
+
+            ratio_value = 1.0
+            if ":" in ratio_str:
+                try:
+                    a, b = ratio_str.split(":", 1)
+                    aw = float(a)
+                    ah = float(b)
+                    if aw > 0 and ah > 0:
+                        ratio_value = aw / ah
+                except Exception:
+                    ratio_value = 1.0
+
+            ratio_value = max(1.0 / 3.0, min(3.0, float(ratio_value)))
+
+            def floor16(v):
+                return max(min_edge, (int(v) // 16) * 16)
+
+            candidates = []
+            if ratio_value >= 1.0:
+                for width in range(min_edge, max_edge + 1, 16):
+                    height = floor16(width / ratio_value)
+                    if height < min_edge or height > max_edge:
+                        continue
+                    area = width * height
+                    if area < min_pixels or area > max_pixels:
+                        continue
+                    actual_ratio = float(width) / float(height)
+                    if actual_ratio > 3.0:
+                        continue
+                    candidates.append((width, height, area, abs(actual_ratio - ratio_value)))
+            else:
+                for height in range(min_edge, max_edge + 1, 16):
+                    width = floor16(height * ratio_value)
+                    if width < min_edge or width > max_edge:
+                        continue
+                    area = width * height
+                    if area < min_pixels or area > max_pixels:
+                        continue
+                    actual_ratio = float(width) / float(height)
+                    if actual_ratio < (1.0 / 3.0):
+                        continue
+                    candidates.append((width, height, area, abs(actual_ratio - ratio_value)))
+
+            if not candidates:
+                if ratio_value >= 1.0:
+                    width = floor16(min(max_edge, (max_pixels * ratio_value) ** 0.5))
+                    height = floor16(width / ratio_value)
+                else:
+                    height = floor16(min(max_edge, (max_pixels / ratio_value) ** 0.5))
+                    width = floor16(height * ratio_value)
+                return f"{int(max(min_edge, width))}x{int(max(min_edge, height))}"
+
+            width, height, _, _ = min(
+                candidates,
+                key=lambda item: (abs(item[2] - target_pixels), item[3], -item[2])
+            )
+            return f"{int(width)}x{int(height)}"
+
+        api_size = get_target_size(resolution, aspect_ratio)
+
+        if image_files:
+            request_mode = "编辑模式"
+            url = f"{api_base}/images/edits"
+            payload = {
+                "model": str(模型选择),
+                "prompt": prompt,
+                "size": api_size,
+            }
+        else:
+            request_mode = "文生图模式"
+            url = f"{api_base}/images/generations"
+            payload = {
+                "model": str(模型选择),
+                "prompt": prompt,
+                "size": api_size,
+                "quality": api_quality,
+                "background": api_background,
+                "moderation": api_moderation,
+                "output_format": api_output_format,
+                "output_compression": int(输出压缩),
+                "n": int(出图数量),
+            }
+
+        headers = {"Authorization": f"Bearer {api_key}"}
+
+        disable_insecure_request_warnings()
+        session, proxies = create_requests_session(bool(使用系统代理))
+        submit_timeout = build_submit_timeout(timeout_val)
+
+        def decode_b64_image(b64_str):
+            try:
+                image_data = base64.b64decode(b64_str)
+                image = Image.open(io.BytesIO(image_data))
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            except Exception:
+                return None
+
+        def download_url_image(image_url):
+            try:
+                img_headers = auth_headers_for_same_origin(str(image_url), api_origin, {"Authorization": f"Bearer {api_key}"})
+                img_res = session.get(image_url, verify=False, timeout=timeout_val, proxies=proxies, headers=img_headers)
+                img_res.raise_for_status()
+                image = Image.open(io.BytesIO(img_res.content))
+                if image.mode != "RGB":
+                    image = image.convert("RGB")
+                return image
+            except Exception:
+                return None
+
+        def extract_image_by_mode(res_json):
+            if accept_mode == "智能模式":
+                return extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=timeout_val)
+            if not isinstance(res_json, dict):
+                return None
+            if accept_mode == "URL":
+                data_list = res_json.get("data")
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict) and isinstance(item.get("url"), str):
+                            img = download_url_image(item.get("url"))
+                            if img:
+                                return img
+                return None
+            if accept_mode == "B64":
+                data_list = res_json.get("data")
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        if isinstance(item, dict) and item.get("b64_json"):
+                            img = decode_b64_image(item.get("b64_json"))
+                            if img:
+                                return img
+                return None
+            return None
+
+        try:
+            print(f"[ComfyUI-shaobkj] Sending GPT-2-Edits request to {url} ({request_mode})...")
+            pbar.update_absolute(50)
+            if image_files:
+                request_files = list(image_files)
+                if mask_file:
+                    request_files.append(("mask", mask_file))
+                response = post_with_retry(
+                    session,
+                    url,
+                    headers=headers,
+                    timeout=submit_timeout,
+                    proxies=proxies,
+                    verify=False,
+                    data=payload,
+                    files=request_files,
+                )
+            else:
+                headers["Content-Type"] = "application/json"
+                response = post_json_with_retry(
+                    session,
+                    url,
+                    headers=headers,
+                    payload=payload,
+                    timeout=submit_timeout,
+                    proxies=proxies,
+                    verify=False,
+                )
+            if response.status_code >= 400:
+                detail = ""
+                err_obj = None
+                try:
+                    err_obj = response.json()
+                    detail = sanitize_text(json.dumps(err_obj, ensure_ascii=False))
+                except Exception:
+                    detail = sanitize_text(response.text)
+                error_code = ""
+                error_message = ""
+                if isinstance(err_obj, dict):
+                    error_block = err_obj.get("error")
+                    if isinstance(error_block, dict):
+                        error_code = str(error_block.get("code") or "").strip()
+                        error_message = str(error_block.get("message") or "").strip()
+                if error_code == "billing_hard_limit_reached":
+                    raise RuntimeError(
+                        f"接口余额/额度已耗尽，无法继续出图。请到中转站或上游账户检查充值、配额与渠道余额。"
+                        f" | 模式: {request_mode} | URL: {url} | 原始响应: {sanitize_text(error_message or detail)}"
+                    )
+                raise RuntimeError(f"接口请求失败: HTTP {response.status_code} | 模式: {request_mode} | URL: {url} | 响应: {detail}")
+            pbar.update_absolute(75)
+
+            try:
+                res_json = response.json()
+            except (json.JSONDecodeError, ValueError) as e:
+                raise RuntimeError(f"接口返回的 JSON 无法解析: {e}")
+
+            result_images = []
+            if accept_mode == "智能模式":
+                data_list = res_json.get("data") if isinstance(res_json, dict) else None
+                if isinstance(data_list, list):
+                    for item in data_list:
+                        img = decode_image_from_data_item(item, session, proxies, api_key, api_origin, timeout_val=timeout_val)
+                        if img is not None:
+                            result_images.append(img)
+                if not result_images:
+                    fallback_img = extract_image_from_json(res_json, session, proxies, api_key, api_origin, timeout_val=timeout_val)
+                    if fallback_img is not None:
+                        result_images.append(fallback_img)
+            else:
+                picked_img = extract_image_by_mode(res_json)
+                if picked_img is not None:
+                    result_images.append(picked_img)
+            if not result_images:
+                raise RuntimeError(f"未从接口响应中解析到图像: {sanitize_text(json.dumps(res_json, ensure_ascii=False))}")
+            pbar.update_absolute(90)
+
+            if len(result_images) == 1:
+                result_tensor = pil_to_tensor(result_images[0])
+            else:
+                result_tensor = torch.cat([pil_to_tensor(img) for img in result_images], dim=0)
+
+            response_lines = [
+                "状态: 成功",
+                f"模式: {request_mode}",
+                f"模型: {模型选择}",
+                f"分辨率: {分辨率}",
+                f"图片比例: {图片比例}",
+                f"实际请求尺寸: {api_size}",
+                f"接收模式: {接收模式}",
+                f"输出质量: {输出质量}",
+                f"背景处理: {背景处理}",
+                f"输入保真度: {输入保真度}",
+                f"审核强度: {审核强度}",
+                f"输出格式: {输出格式}",
+                f"输出压缩: {int(输出压缩)}",
+                f"返回数量: {len(result_images)}",
+                f"输入图像数量: {len(image_files)}",
+                f"mask: {'是' if mask_file else '否'}",
                 f"seed: {int(seed)}",
             ]
             try:

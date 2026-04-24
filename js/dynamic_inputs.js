@@ -6,6 +6,8 @@ const DYNAMIC_NODES = [
     "🤖图像生成",
     "Shaobkj_GPTImage2_Node",
     "🖼️ gpt-image-2 生图",
+    "Shaobkj_GPT2Edits_Node",
+    "🖼️ gpt-2-Edits",
     "Shaobkj_Sora_Video", 
     "Shaobkj_Veo_Video",
     "Shaobkj_SD20_Video",
@@ -29,6 +31,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
     "Shaobkj_APINode_Batch",
     "Shaobkj_GPTImage2_Node",
+    "Shaobkj_GPT2Edits_Node",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
     "Shaobkj_SD20_Video",
@@ -58,10 +61,12 @@ const THEME_CONFIG = {
     "Shaobkj_APINode": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_APINode_Batch": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_GPTImage2_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_GPT2Edits_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖并发-编辑-文本驱动": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🖼️ gpt-image-2 生图": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🖼️ gpt-2-Edits": { color: "#7D24A6", bgcolor: "#1E0A29" },
 
     // 🎬 导演系列 (视频生成) - Future Blue
     "Shaobkj_Sora_Video": { color: "#0091EA", bgcolor: "#001A2E" },
@@ -127,6 +132,12 @@ function shouldManageDynamicInputsByNode(node) {
         return true;
     }
     return false;
+}
+
+function isShaobkjGpt2EditsNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    return t === "Shaobkj_GPT2Edits_Node" || (typeof title === "string" && title.includes("gpt-2-Edits"));
 }
 
 function getDynamicInputSpec(node) {
@@ -685,6 +696,10 @@ function manageInputs(node, onlyAdd = false) {
             return;
         }
 
+        if (manageGpt2EditsPairedInputs(node, onlyAdd)) {
+            return;
+        }
+
         let changed = false;
         const spec = getDynamicInputSpec(node);
         if (!spec) return;
@@ -812,6 +827,97 @@ function manageInputs(node, onlyAdd = false) {
     } catch (e) {
         console.error("[Shaobkj] Error in manageInputs:", e);
     }
+}
+
+function manageGpt2EditsPairedInputs(node, onlyAdd = false) {
+    if (!isShaobkjGpt2EditsNode(node)) {
+        return false;
+    }
+
+    let changed = false;
+    const maxInputs = 16;
+    const minInputs = 1;
+
+    for (let i = node.inputs.length - 1; i >= 0; i--) {
+        const inputName = String(node.inputs[i]?.name || "");
+        if (inputName === "mask") {
+            node.removeInput(i);
+            changed = true;
+        }
+    }
+
+    const getIndexedInputs = (prefix) => {
+        return node.inputs
+            .filter((inp) => inp && inp.name && new RegExp(`^${prefix}\\d+$`).test(String(inp.name)))
+            .sort((a, b) => {
+                const idxA = parseInt(String(a.name).replace(prefix, "") || "0");
+                const idxB = parseInt(String(b.name).replace(prefix, "") || "0");
+                return idxA - idxB;
+            });
+    };
+
+    const imageInputs = getIndexedInputs("image_");
+    const maskInputs = getIndexedInputs("mask_");
+
+    let highestConnectedIndex = 0;
+    for (const input of [...imageInputs, ...maskInputs]) {
+        const name = String(input.name || "");
+        const idx = parseInt(name.split("_")[1] || "0");
+        if (input.link !== null && input.link !== undefined && input.link !== -1) {
+            if (idx > highestConnectedIndex) {
+                highestConnectedIndex = idx;
+            }
+        }
+    }
+
+    let targetCount = Math.max(highestConnectedIndex + 1, minInputs);
+    targetCount = Math.min(targetCount, maxInputs);
+
+    for (let i = 1; i <= targetCount; i++) {
+        const imageName = `image_${i}`;
+        const maskName = `mask_${i}`;
+        if ((node.findInputSlot ? node.findInputSlot(imageName) : -1) === -1) {
+            node.addInput(imageName, "IMAGE");
+            changed = true;
+        }
+        if ((node.findInputSlot ? node.findInputSlot(maskName) : -1) === -1) {
+            node.addInput(maskName, "MASK");
+            changed = true;
+        }
+    }
+
+    if (!onlyAdd) {
+        for (let i = maxInputs; i > targetCount; i--) {
+            const imageName = `image_${i}`;
+            const maskName = `mask_${i}`;
+            const imageIndex = node.findInputSlot ? node.findInputSlot(imageName) : -1;
+            const maskIndex = node.findInputSlot ? node.findInputSlot(maskName) : -1;
+            const imageInput = imageIndex !== -1 ? node.inputs[imageIndex] : null;
+            const maskInput = maskIndex !== -1 ? node.inputs[maskIndex] : null;
+            const imageLinked = imageInput && imageInput.link !== null && imageInput.link !== undefined && imageInput.link !== -1;
+            const maskLinked = maskInput && maskInput.link !== null && maskInput.link !== undefined && maskInput.link !== -1;
+            if (!imageLinked && !maskLinked) {
+                if (maskIndex !== -1) {
+                    node.removeInput(maskIndex);
+                    changed = true;
+                }
+                const refreshedImageIndex = node.findInputSlot ? node.findInputSlot(imageName) : -1;
+                if (refreshedImageIndex !== -1) {
+                    node.removeInput(refreshedImageIndex);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    if (setupLinkWidget(node)) changed = true;
+    if (setupLongSideWidget(node)) changed = true;
+    if (setupNodeStyle(node)) changed = true;
+    if (changed) {
+        node.onResize?.(node.size);
+        node.setDirtyCanvas(true, true);
+    }
+    return true;
 }
 
 function manageSd20MultiInputs(node, onlyAdd = false) {
@@ -1059,6 +1165,8 @@ function cleanupDynamicInputs(node) {
         const n = node.inputs[i]?.name || "";
         if (
             n.startsWith("image_") ||
+            /^mask_\d+$/.test(n) ||
+            n === "mask" ||
             n.startsWith("video_") ||
             /^提示词\d+$/.test(n) ||
             n === "参考图" ||
