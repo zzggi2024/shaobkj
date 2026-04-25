@@ -13,6 +13,7 @@ from .node_free_color import Shaobkj_FreeColor
 from .node_text_process import Shaobkj_Text_Process, Shaobkj_InfinitePromptJoin
 from .node_quick_mark import Shaobkj_QuickMark
 from .node_font_style_selector import Shaobkj_FontStyleSelector
+from .node_image_split import Shaobkj_ImageSplit
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
@@ -45,6 +46,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_InfinitePromptJoin": Shaobkj_InfinitePromptJoin,
     "Shaobkj_QuickMark": Shaobkj_QuickMark,
     "Shaobkj_FontStyleSelector": Shaobkj_FontStyleSelector,
+    "Shaobkj_ImageSplit": Shaobkj_ImageSplit,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -78,6 +80,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_InfinitePromptJoin": "✨ 无限提示词联结",
     "Shaobkj_QuickMark": "🏷️ 快速标记",
     "Shaobkj_FontStyleSelector": "🖋️ 字体风格提示词选择器",
+    "Shaobkj_ImageSplit": "🧩 图像拆分",
 }
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")
