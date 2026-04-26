@@ -8,6 +8,70 @@ from PIL import Image
 from .shaobkj_shared import reserve_output_file_path
 
 
+def _find_separator_interval(profile, target, image_length, split_count):
+    if split_count <= 1:
+        return None
+    search_radius = max(8, image_length // max(8, split_count * 4))
+    left = max(1, int(target) - search_radius)
+    right = min(image_length - 1, int(target) + search_radius)
+    if right <= left:
+        return None
+
+    candidates = np.where(profile[left:right] >= 0.82)[0]
+    if candidates.size == 0:
+        return None
+    candidates = candidates + left
+
+    runs = []
+    start = int(candidates[0])
+    prev = int(candidates[0])
+    for value in candidates[1:]:
+        value = int(value)
+        if value == prev + 1:
+            prev = value
+        else:
+            runs.append((start, prev + 1))
+            start = value
+            prev = value
+    runs.append((start, prev + 1))
+
+    best = min(runs, key=lambda item: abs(((item[0] + item[1]) / 2) - target))
+    if best[1] - best[0] < 2 and image_length > 256:
+        return None
+    return best
+
+
+def _build_split_intervals(image_uint8, count, axis, mode):
+    length = image_uint8.shape[1] if axis == 1 else image_uint8.shape[0]
+    count = max(1, int(count))
+    if count <= 1:
+        return [(0, length)]
+
+    if mode != "智能分隔线":
+        return [(i * length // count, (i + 1) * length // count) for i in range(count)]
+
+    white_mask = np.all(image_uint8 >= 235, axis=2)
+    profile = white_mask.mean(axis=0 if axis == 1 else 1)
+    separators = []
+    for i in range(1, count):
+        target = i * length / count
+        interval = _find_separator_interval(profile, target, length, count)
+        if interval is None:
+            return [(j * length // count, (j + 1) * length // count) for j in range(count)]
+        separators.append(interval)
+
+    intervals = []
+    start = 0
+    for sep_start, sep_end in separators:
+        intervals.append((start, sep_start))
+        start = sep_end
+    intervals.append((start, length))
+
+    if len(intervals) != count or any(end <= start for start, end in intervals):
+        return [(i * length // count, (i + 1) * length // count) for i in range(count)]
+    return intervals
+
+
 class Shaobkj_ImageSplit:
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
     FUNCTION = "split_image"
@@ -24,6 +88,7 @@ class Shaobkj_ImageSplit:
                 "保存目录": ("STRING", {"default": "Shaobkj_ImageSplit", "multiline": False, "tooltip": "相对输出目录的子路径；也支持绝对路径"}),
                 "水平张数": ("INT", {"default": 3, "min": 1, "max": 8, "step": 1, "tooltip": "横向拆分数量，最多 8 张"}),
                 "垂直张数": ("INT", {"default": 3, "min": 1, "max": 8, "step": 1, "tooltip": "纵向拆分数量，最多 8 张"}),
+                "裁切模式": (["等分网格", "智能分隔线"], {"default": "智能分隔线", "tooltip": "智能分隔线会自动识别白色分隔带，识别失败则回退为等分网格"}),
                 "移除间距边缘": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭", "tooltip": "是否裁掉每块四周的边缘像素"}),
                 "移除缩边": ("INT", {"default": 15, "min": 0, "max": 4096, "step": 1, "tooltip": "每块四周裁掉的像素值"}),
                 "文件名前缀": ("STRING", {"default": "分割图像_输出", "multiline": False, "tooltip": "保存文件名前缀"}),
@@ -31,7 +96,7 @@ class Shaobkj_ImageSplit:
             }
         }
 
-    def split_image(self, 图像, 保存目录, 水平张数, 垂直张数, 移除间距边缘, 移除缩边, 文件名前缀, 保存格式):
+    def split_image(self, 图像, 保存目录, 水平张数, 垂直张数, 裁切模式, 移除间距边缘, 移除缩边, 文件名前缀, 保存格式):
         images = 图像
         if isinstance(images, torch.Tensor) and images.dim() == 3:
             images = images.unsqueeze(0)
@@ -70,16 +135,13 @@ class Shaobkj_ImageSplit:
             if arr.shape[-1] == 1:
                 arr = np.repeat(arr, 3, axis=2)
             image_uint8 = (arr[:, :, :3] * 255.0).astype(np.uint8)
-            h, w = image_uint8.shape[:2]
-            x_edges = np.linspace(0, w, cols + 1, dtype=np.int32)
-            y_edges = np.linspace(0, h, rows + 1, dtype=np.int32)
+            x_intervals = _build_split_intervals(image_uint8, cols, 1, 裁切模式)
+            y_intervals = _build_split_intervals(image_uint8, rows, 0, 裁切模式)
 
             for row in range(rows):
                 for col in range(cols):
-                    x0 = int(x_edges[col])
-                    x1 = int(x_edges[col + 1])
-                    y0 = int(y_edges[row])
-                    y1 = int(y_edges[row + 1])
+                    x0, x1 = x_intervals[col]
+                    y0, y1 = y_intervals[row]
                     tile = image_uint8[y0:y1, x0:x1]
                     if tile.size == 0:
                         continue

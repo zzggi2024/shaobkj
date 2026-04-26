@@ -147,6 +147,12 @@ function shouldManageDynamicInputsByNode(node) {
     return false;
 }
 
+function isShaobkjGpt2EditsNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    return t === "Shaobkj_GPT2Edits_Node" || (typeof title === "string" && title.includes("gpt-2-Edits"));
+}
+
 function isShaobkjImageSplitNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
@@ -159,6 +165,22 @@ function getImageSplitCount(node) {
     return Math.min(64, Math.max(1, Math.trunc(cols) || 1) * Math.max(1, Math.trunc(rows) || 1));
 }
 
+function getImageSplitOutputName(index) {
+    return `裁切图像${index}`;
+}
+
+function shrinkImageSplitNode(node) {
+    if (!isShaobkjImageSplitNode(node)) return;
+    const minHeight = 220;
+    let computed = null;
+    if (typeof node.computeSize === "function") {
+        computed = node.computeSize();
+    }
+    const width = Math.max(460, Number(computed?.[0] || node.size?.[0] || 460));
+    const height = Math.max(minHeight, Number(computed?.[1] || minHeight));
+    node.size = [width, height];
+}
+
 function manageImageSplitOutputs(node) {
     if (!isShaobkjImageSplitNode(node)) return false;
     if (!Array.isArray(node.outputs)) node.outputs = [];
@@ -166,7 +188,7 @@ function manageImageSplitOutputs(node) {
     let changed = false;
 
     for (let i = 0; i < targetCount; i++) {
-        const name = `裁切图像${i + 1}`;
+        const name = getImageSplitOutputName(i + 1);
         if (!node.outputs[i]) {
             node.addOutput(name, "IMAGE");
             changed = true;
@@ -191,6 +213,7 @@ function manageImageSplitOutputs(node) {
     }
 
     if (changed) {
+        shrinkImageSplitNode(node);
         node.onResize?.(node.size);
         node.setDirtyCanvas(true, true);
     }
