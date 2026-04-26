@@ -11,9 +11,13 @@ const DYNAMIC_NODES = [
     "Shaobkj_Sora_Video", 
     "Shaobkj_Veo_Video",
     "Shaobkj_SD20_Video",
-    "🤖 Shaobkj -Sora视频",
+    "Shaobkj_Grok_Video",
+    "Shaobkj_Grok3_Video",
+    "🤖 Shaobkj -Sora视频", 
     "🤖 Shaobkj -Veo视频",
     "🎬 SD_2.0视频",
+    "🎬 Grok视频",
+    "🎬 Grok3 Video",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "🤖并发-编辑-图像驱动",
     "Shaobkj_GroupedConcurrentImageEdit",
@@ -35,6 +39,8 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
     "Shaobkj_SD20_Video",
+    "Shaobkj_Grok_Video",
+    "Shaobkj_Grok3_Video",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "Shaobkj_GroupedConcurrentImageEdit",
     "Shaobkj_LLM_App",
@@ -72,9 +78,13 @@ const THEME_CONFIG = {
     "Shaobkj_Sora_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj_Veo_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj_SD20_Video": { color: "#0091EA", bgcolor: "#001A2E" },
+    "Shaobkj_Grok_Video": { color: "#0091EA", bgcolor: "#001A2E" },
+    "Shaobkj_Grok3_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "🤖 Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "🤖 Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 SD_2.0视频": { color: "#0091EA", bgcolor: "#001A2E" },
+    "🎬 Grok视频": { color: "#0091EA", bgcolor: "#001A2E" },
+    "🎬 Grok3 Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
 
@@ -158,6 +168,15 @@ function getDynamicInputSpec(node) {
             minInputs: 2,
             maxInputs: 9,
             legacyPrefixes: ["image_"],
+            legacyNames: ["参考图"],
+        };
+    }
+    if (t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok3 Video")))) {
+        return {
+            prefix: "参考图",
+            slotType: "IMAGE",
+            minInputs: 2,
+            maxInputs: 9,
             legacyNames: ["参考图"],
         };
     }
@@ -407,6 +426,63 @@ function setupNanoBananaEditingMode(node) {
         changed = setWidgetDisabledState(brandWidget, isEditingMode) || changed;
     }
     if (changed) {
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
+}
+
+function setupGrokVideoDurationMode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    if (!(t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok3 Video"))))) {
+        return false;
+    }
+    if (!node.widgets) return false;
+
+    const modelWidget = findWidgetByNames(node, ["模型"]);
+    const durationWidget = findWidgetByNames(node, ["生成时长"]);
+    if (!modelWidget || !durationWidget) return false;
+
+    const modelValue = String(modelWidget.value || "").trim();
+    let allowedValues = ["6", "10", "15"];
+    let forcedValue = null;
+    if (modelValue.endsWith("-20s")) {
+        allowedValues = ["20"];
+        forcedValue = "20";
+    } else if (modelValue.endsWith("-30s")) {
+        allowedValues = ["30"];
+        forcedValue = "30";
+    }
+
+    let changed = false;
+    if (!durationWidget.options) {
+        durationWidget.options = {};
+        changed = true;
+    }
+    const currentValues = Array.isArray(durationWidget.options.values) ? durationWidget.options.values.map((v) => String(v)) : [];
+    const sameValues = currentValues.length === allowedValues.length && currentValues.every((v, i) => v === allowedValues[i]);
+    if (!sameValues) {
+        durationWidget.options.values = allowedValues;
+        changed = true;
+    }
+
+    if (forcedValue !== null) {
+        if (String(durationWidget.value) !== forcedValue) {
+            durationWidget.value = forcedValue;
+            changed = true;
+        }
+        changed = setWidgetDisabledState(durationWidget, true) || changed;
+    } else {
+        const currentDuration = String(durationWidget.value ?? "");
+        if (!allowedValues.includes(currentDuration)) {
+            durationWidget.value = allowedValues[0];
+            changed = true;
+        }
+        changed = setWidgetDisabledState(durationWidget, false) || changed;
+    }
+
+    if (changed) {
+        node.onResize?.(node.size);
         node.setDirtyCanvas(true, true);
     }
     return changed;
@@ -1520,6 +1596,7 @@ app.registerExtension({
                     setupLoadImageListLocalization(node);
                     setupLoadBatchImagesLocalization(node);
                     setupNanoBananaEditingMode(node);
+                    setupGrokVideoDurationMode(node);
                     setupTextProcessListMode(node);
                     if (isShaobkjTextProcessNode(node)) {
                         const currentSourceText = getTextProcessSourceText(node);
@@ -1614,6 +1691,7 @@ app.registerExtension({
                     setupLoadImageListLocalization(this);
                     setupLoadBatchImagesLocalization(this);
                     setupNanoBananaEditingMode(this);
+                    setupGrokVideoDurationMode(this);
                     setupImageSaveCustomSizeMode(this);
                     setupTextProcessListMode(this);
                     initializeTextProcessState(this);
@@ -1653,6 +1731,7 @@ app.registerExtension({
                 
                 setTimeout(() => {
                     setupNanoBananaEditingMode(this);
+                    setupGrokVideoDurationMode(this);
                     setupImageSaveCustomSizeMode(this);
                     setupTextProcessListMode(this);
                     setupLoadBatchImagesLocalization(this);
@@ -1682,6 +1761,7 @@ app.registerExtension({
                     }
                 }
                 setupNanoBananaEditingMode(this);
+                setupGrokVideoDurationMode(this);
                 setupImageSaveCustomSizeMode(this);
                 setupTextProcessListMode(this);
                 setupLoadBatchImagesLocalization(this);

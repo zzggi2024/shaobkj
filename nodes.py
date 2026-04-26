@@ -2,6 +2,8 @@ from .node_api_generator import Shaobkj_APINode, Shaobkj_APINode_Batch, Shaobkj_
 from .node_video import Shaobkj_Sora_Video
 from .node_veo_video import Shaobkj_Veo_Video
 from .node_sd20_video import Shaobkj_SD20_Video
+from .node_grok_video import Shaobkj_Grok_Video
+from .node_grok3_video import Shaobkj_Grok3_Video
 from .node_concurrent_image_edit import Shaobkj_ConcurrentImageEdit_Sender, Shaobkj_GroupedConcurrentImageEdit, Shaobkj_Load_Image_Path, Shaobkj_Load_Batch_Images, Shaobkj_Image_Save, Shaobkj_Fixed_Seed
 from .node_llm_app import Shaobkj_LLM_App, Shaobkj_NanoBanana_Prompt
 from .node_loop import Shaobkj_ForLoop_Start, Shaobkj_ForLoop_End, Shaobkj_Loop_Trigger
@@ -24,6 +26,8 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_Sora_Video": Shaobkj_Sora_Video,
     "Shaobkj_Veo_Video": Shaobkj_Veo_Video,
     "Shaobkj_SD20_Video": Shaobkj_SD20_Video,
+    "Shaobkj_Grok_Video": Shaobkj_Grok_Video,
+    "Shaobkj_Grok3_Video": Shaobkj_Grok3_Video,
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
     "Shaobkj_GroupedConcurrentImageEdit": Shaobkj_GroupedConcurrentImageEdit,
     "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
@@ -58,6 +62,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_Sora_Video": "🤖 Shaobkj -Sora视频",
     "Shaobkj_Veo_Video": "🤖 Shaobkj -Veo视频",
     "Shaobkj_SD20_Video": "🎬 SD_2.0视频",
+    "Shaobkj_Grok_Video": "🎬 Grok视频",
+    "Shaobkj_Grok3_Video": "🎬 Grok3 Video",
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
     "Shaobkj_GroupedConcurrentImageEdit": "🧩组合并发",
     "Shaobkj_Load_Image_Path": "🤖加载图像",
