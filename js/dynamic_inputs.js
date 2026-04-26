@@ -30,6 +30,8 @@ const DYNAMIC_NODES = [
     "🤖香蕉专属提示词",
     "Shaobkj_InfinitePromptJoin",
     "✨ 无限提示词联结",
+    "Shaobkj_ImageSplit",
+    "🧩 图像拆分",
 ];
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
@@ -52,6 +54,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_LoadImageListFromDir",
     "Shaobkj_Text_Process",
     "Shaobkj_InfinitePromptJoin",
+    "Shaobkj_ImageSplit",
 ];
 const MIN_INPUTS = 2;
 let started = false;
@@ -144,10 +147,54 @@ function shouldManageDynamicInputsByNode(node) {
     return false;
 }
 
-function isShaobkjGpt2EditsNode(node) {
+function isShaobkjImageSplitNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
-    return t === "Shaobkj_GPT2Edits_Node" || (typeof title === "string" && title.includes("gpt-2-Edits"));
+    return t === "Shaobkj_ImageSplit" || (typeof title === "string" && title.includes("图像拆分"));
+}
+
+function getImageSplitCount(node) {
+    const cols = Number(findWidgetByNames(node, ["水平张数"])?.value ?? 3);
+    const rows = Number(findWidgetByNames(node, ["垂直张数"])?.value ?? 3);
+    return Math.min(64, Math.max(1, Math.trunc(cols) || 1) * Math.max(1, Math.trunc(rows) || 1));
+}
+
+function manageImageSplitOutputs(node) {
+    if (!isShaobkjImageSplitNode(node)) return false;
+    if (!Array.isArray(node.outputs)) node.outputs = [];
+    const targetCount = getImageSplitCount(node);
+    let changed = false;
+
+    for (let i = 0; i < targetCount; i++) {
+        const name = `裁切图像${i + 1}`;
+        if (!node.outputs[i]) {
+            node.addOutput(name, "IMAGE");
+            changed = true;
+        } else {
+            if (node.outputs[i].name !== name) {
+                node.outputs[i].name = name;
+                changed = true;
+            }
+            if (node.outputs[i].type !== "IMAGE") {
+                node.outputs[i].type = "IMAGE";
+                changed = true;
+            }
+        }
+    }
+
+    for (let i = node.outputs.length - 1; i >= targetCount; i--) {
+        const outputName = String(node.outputs[i]?.name || "");
+        if (/^(裁切图像|分割图像)/.test(outputName)) {
+            node.removeOutput(i);
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        node.onResize?.(node.size);
+        node.setDirtyCanvas(true, true);
+    }
+    return true;
 }
 
 function getDynamicInputSpec(node) {
@@ -1606,7 +1653,9 @@ app.registerExtension({
                     }
                     syncSeedControl(node);
                     sanitizeNumericWidgets(node);
-                    if (shouldManageDynamicInputsByNode(node)) {
+                    if (isShaobkjImageSplitNode(node)) {
+                        manageImageSplitOutputs(node);
+                    } else if (shouldManageDynamicInputsByNode(node)) {
                         manageInputs(node);
                     } else {
                         cleanupDynamicInputs(node);
@@ -1677,7 +1726,9 @@ app.registerExtension({
                 
                 // Run manageInputs immediately to ensure slots exist for link restoration
                 // Use onlyAdd=true to prevent removing slots during initial load
-                if (needsDynamicInputs) {
+                if (isShaobkjImageSplitNode(this)) {
+                    manageImageSplitOutputs(this);
+                } else if (needsDynamicInputs) {
                     manageInputs(this, true);
                 } else {
                     cleanupDynamicInputs(this);
@@ -1698,7 +1749,9 @@ app.registerExtension({
                     syncSeedControl(this);
                     sanitizeNumericWidgets(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
-                    if (needsDynamicInputs) {
+                    if (isShaobkjImageSplitNode(this)) {
+                        manageImageSplitOutputs(this);
+                    } else if (needsDynamicInputs) {
                         manageInputs(this, true);
                     } else {
                         cleanupDynamicInputs(this);
@@ -1714,7 +1767,9 @@ app.registerExtension({
                 
                 if (type === 1) {
                     setTimeout(() => {
-                        if (needsDynamicInputs) {
+                        if (isShaobkjImageSplitNode(this)) {
+                            manageImageSplitOutputs(this);
+                        } else if (needsDynamicInputs) {
                             manageInputs(this);
                         } else {
                             cleanupDynamicInputs(this);
@@ -1735,7 +1790,9 @@ app.registerExtension({
                     setupImageSaveCustomSizeMode(this);
                     setupTextProcessListMode(this);
                     setupLoadBatchImagesLocalization(this);
-                    if (needsDynamicInputs) {
+                    if (isShaobkjImageSplitNode(this)) {
+                        manageImageSplitOutputs(this);
+                    } else if (needsDynamicInputs) {
                         manageInputs(this);
                     } else {
                         cleanupDynamicInputs(this);
@@ -1759,6 +1816,9 @@ app.registerExtension({
                     if (this.__shaobkjTextProcessLastText !== textValue) {
                         initializeTextProcessState(this);
                     }
+                }
+                if (name === "水平张数" || name === "垂直张数") {
+                    manageImageSplitOutputs(this);
                 }
                 setupNanoBananaEditingMode(this);
                 setupGrokVideoDurationMode(this);

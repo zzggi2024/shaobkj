@@ -11,9 +11,9 @@ from .shaobkj_shared import reserve_output_file_path
 class Shaobkj_ImageSplit:
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
     FUNCTION = "split_image"
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("分割图像列表", "分割图像")
-    OUTPUT_IS_LIST = (True, False)
+    MAX_SPLIT_OUTPUTS = 64
+    RETURN_TYPES = tuple("IMAGE" for _ in range(MAX_SPLIT_OUTPUTS))
+    RETURN_NAMES = tuple(f"裁切图像{i}" for i in range(1, MAX_SPLIT_OUTPUTS + 1))
     OUTPUT_NODE = True
 
     @classmethod
@@ -22,8 +22,8 @@ class Shaobkj_ImageSplit:
             "required": {
                 "图像": ("IMAGE", {"tooltip": "输入待拆分图像"}),
                 "保存目录": ("STRING", {"default": "Shaobkj_ImageSplit", "multiline": False, "tooltip": "相对输出目录的子路径；也支持绝对路径"}),
-                "水平张数": ("INT", {"default": 3, "min": 1, "max": 64, "step": 1, "tooltip": "横向拆分数量"}),
-                "垂直张数": ("INT", {"default": 3, "min": 1, "max": 64, "step": 1, "tooltip": "纵向拆分数量"}),
+                "水平张数": ("INT", {"default": 3, "min": 1, "max": 8, "step": 1, "tooltip": "横向拆分数量，最多 8 张"}),
+                "垂直张数": ("INT", {"default": 3, "min": 1, "max": 8, "step": 1, "tooltip": "纵向拆分数量，最多 8 张"}),
                 "移除间距边缘": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭", "tooltip": "是否裁掉每块四周的边缘像素"}),
                 "移除缩边": ("INT", {"default": 15, "min": 0, "max": 4096, "step": 1, "tooltip": "每块四周裁掉的像素值"}),
                 "文件名前缀": ("STRING", {"default": "分割图像_输出", "multiline": False, "tooltip": "保存文件名前缀"}),
@@ -46,8 +46,8 @@ class Shaobkj_ImageSplit:
             save_dir = os.path.join(output_root, save_dir)
         os.makedirs(save_dir, exist_ok=True)
 
-        cols = max(1, int(水平张数))
-        rows = max(1, int(垂直张数))
+        cols = min(8, max(1, int(水平张数)))
+        rows = min(8, max(1, int(垂直张数)))
         trim_px = max(0, int(移除缩边)) if bool(移除间距边缘) else 0
         extension = str(保存格式 or "PNG").strip().lower()
         if extension == "jpg":
@@ -121,7 +121,7 @@ class Shaobkj_ImageSplit:
         if not saved_paths:
             raise ValueError("❌ 错误：没有成功拆分出任何图像。")
 
-        result_dir = save_dir.replace("\\", "/")
+        result = tuple(split_images[i] if i < len(split_images) else split_images[-1] for i in range(self.MAX_SPLIT_OUTPUTS))
         if preview_entries:
-            return {"ui": {"images": preview_entries}, "result": (split_images, result_dir)}
-        return (split_images, result_dir)
+            return {"ui": {"images": preview_entries}, "result": result}
+        return result
