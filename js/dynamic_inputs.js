@@ -4,8 +4,6 @@ import { app } from "/scripts/app.js";
 const DYNAMIC_NODES = [
     "Shaobkj_APINode",
     "🤖图像生成",
-    "Shaobkj_GPTImage2_Node",
-    "🖼️ gpt-image-2 生图",
     "Shaobkj_GPT2Edits_Node",
     "🖼️ gpt-2-Edits",
     "Shaobkj_Sora_Video", 
@@ -36,7 +34,6 @@ const DYNAMIC_NODES = [
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
     "Shaobkj_APINode_Batch",
-    "Shaobkj_GPTImage2_Node",
     "Shaobkj_GPT2Edits_Node",
     "Shaobkj_Sora_Video",
     "Shaobkj_Veo_Video",
@@ -69,12 +66,10 @@ const THEME_CONFIG = {
     // 🔮 创世系列 (图像生成) - Electric Violet
     "Shaobkj_APINode": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_APINode_Batch": { color: "#7D24A6", bgcolor: "#1E0A29" },
-    "Shaobkj_GPTImage2_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_GPT2Edits_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖并发-编辑-文本驱动": { color: "#7D24A6", bgcolor: "#1E0A29" },
-    "🖼️ gpt-image-2 生图": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🖼️ gpt-2-Edits": { color: "#7D24A6", bgcolor: "#1E0A29" },
 
     // 🎬 导演系列 (视频生成) - Future Blue
