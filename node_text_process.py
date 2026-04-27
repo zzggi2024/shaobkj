@@ -7,6 +7,9 @@ from server import PromptServer
 NUMBER_PREFIX_PATTERN = re.compile(r"^\s*(?:\d+|[一二三四五六七八九十百千万零〇两]+)(?:\s*[\.．、,，:：;；\)\]）】>\-—_]+|\s+)+")
 REMOVE_PREFIX_NUMBER_ALIASES = {"去除开头编号", "删除开头编号", "去掉开头编号"}
 
+TEXT_PROCESS_STATE = {}
+LAST_TEXT_INPUT = {}  # 记录上一次的文本输入，用于检测变化
+
 
 def _remove_line_prefix_numbers(text):
     lines = text.splitlines()
@@ -47,19 +50,28 @@ class Shaobkj_Text_Process:
                 "计数开始": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "计数结束": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "mode": ("BOOLEAN", {"default": True, "label_on": "触发", "label_off": "不触发", "tooltip": "是否按编号自动继续触发队列"}),
-                "当前执行编号状态": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "当前执行编号": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "tooltip": "实时显示当前执行编号"}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
-    def process_text(self, 文本, 模式选择, 去除内容, 列表, 计数开始, 计数结束, mode, 当前执行编号状态, unique_id):
+    def process_text(self, 文本, 模式选择, 去除内容, 列表, 计数开始, 计数结束, mode, 当前执行编号, unique_id):
         source = str(文本) if 文本 is not None else ""
+        
+        # 检测文本输入是否变化，如果变化则重置状态
+        state_key = str(unique_id)
+        last_text = LAST_TEXT_INPUT.get(state_key)
+        if last_text != source:
+            LAST_TEXT_INPUT[state_key] = source
+            if state_key in TEXT_PROCESS_STATE:
+                del TEXT_PROCESS_STATE[state_key]
+                print(f"[文本处理] Node {unique_id}: 检测到文本输入变化，重置循环状态")
+
         selected_mode = 模式选择 if 模式选择 is not None else "去空行"
         remove_content = str(去除内容) if 去除内容 is not None else ""
         list_mode = bool(列表)
         start_value = max(0, int(计数开始) if 计数开始 is not None else 0)
         end_value = int(计数结束) if 计数结束 is not None else 0
-        current_state = int(当前执行编号状态) if 当前执行编号状态 is not None else start_value
         trigger_mode = bool(mode)
         result = source
 
@@ -101,19 +113,36 @@ class Shaobkj_Text_Process:
             end_value = min(max(end_value, start_value + 1), total_count)
             output_count = max(0, end_value - start_value)
             max_index = end_value - 1
-            current_index = min(max(start_value, current_state), max_index)
-            _send_text_process_feedback(unique_id, "当前执行编号状态", current_index)
+
+            state_key = str(unique_id)
+            state = TEXT_PROCESS_STATE.get(state_key, {"initialized": False})
+            initialized = bool(state.get("initialized", False))
+
+            print(f"[文本处理] Node {unique_id}: initialized={initialized}, 当前执行编号={当前执行编号}, start={start_value}, max={max_index}")
+
+            if not initialized:
+                TEXT_PROCESS_STATE[state_key] = {"initialized": True}
+                _send_text_process_feedback(unique_id, "当前执行编号", start_value)
+                print(f"[文本处理] Node {unique_id}: 初始化，设置当前执行编号为 {start_value}")
+
+            current_index = min(max(int(当前执行编号) if 当前执行编号 is not None else start_value, start_value), max_index)
+            print(f"[文本处理] Node {unique_id}: current_index={current_index}")
+
             if trigger_mode:
                 output_list = [result_list[current_index]]
                 if current_index < max_index:
-                    _send_text_process_feedback(unique_id, "当前执行编号状态", current_index + 1)
+                    print(f"[文本处理] Node {unique_id}: 触发下一次队列，current_index={current_index}，下一个={current_index + 1}")
+                    _send_text_process_feedback(unique_id, "当前执行编号", current_index + 1)
                     PromptServer.instance.send_sync("shaobkj.add_queue", {})
                 else:
-                    _send_text_process_feedback(unique_id, "当前执行编号状态", start_value)
+                    print(f"[文本处理] Node {unique_id}: 循环结束，重置为 0")
+                    _send_text_process_feedback(unique_id, "当前执行编号", 0)
+                    TEXT_PROCESS_STATE[state_key] = {"initialized": False}
             else:
-                _send_text_process_feedback(unique_id, "当前执行编号状态", current_index)
+                _send_text_process_feedback(unique_id, "当前执行编号", current_index)
         else:
-            _send_text_process_feedback(unique_id, "当前执行编号状态", 0)
+            _send_text_process_feedback(unique_id, "当前执行编号", 0)
+            TEXT_PROCESS_STATE[str(unique_id)] = {"initialized": False}
 
         if list_mode:
             return (output_list, output_count, current_index)

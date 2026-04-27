@@ -434,7 +434,7 @@ function initializeTextProcessState(node) {
     if (!isShaobkjTextProcessNode(node) || !node.widgets) return false;
     const startWidget = findWidgetByNames(node, ["计数开始"]);
     const endWidget = findWidgetByNames(node, ["计数结束"]);
-    const stateWidget = findWidgetByNames(node, ["当前执行编号状态"]);
+    const stateWidget = findWidgetByNames(node, ["当前执行编号"]);
     if (!startWidget || !endWidget || !stateWidget) return false;
     const maxLines = getTextProcessMaxLineCount(node);
     const startValue = Math.max(0, Number(startWidget.value ?? 0));
@@ -582,7 +582,7 @@ function setupTextProcessListMode(node) {
     const startWidget = findWidgetByNames(node, ["计数开始"]);
     const endWidget = findWidgetByNames(node, ["计数结束"]);
     const modeWidget = findWidgetByNames(node, ["mode"]);
-    const stateWidget = findWidgetByNames(node, ["当前执行编号状态"]);
+    const stateWidget = findWidgetByNames(node, ["当前执行编号"]);
     const textWidget = findWidgetByNames(node, ["文本"]);
     if (!listWidget) return false;
     const totalOutput = node.outputs[1];
@@ -631,7 +631,8 @@ function setupTextProcessListMode(node) {
         changed = setWidgetDisabledState(endWidget, !enabled) || changed;
     }
     if (stateWidget) {
-        changed = setWidgetHiddenState(stateWidget, true) || changed;
+        changed = setWidgetHiddenState(stateWidget, false) || changed;
+        stateWidget.readonly = true;
     }
     const previousEnabled = node.__shaobkjTextProcessListEnabled;
     const previousStartValue = node.__shaobkjTextProcessLastStartValue;
@@ -1378,6 +1379,12 @@ function setupLinkWidget(node) {
         newWidget.tooltip = "按当前文本重新计算去空行后的最大列表行数，并初始化计数";
         newWidget.serialize = false;
         node.setDirtyCanvas(true, true);
+        // 设置"当前执行编号"控件为只读
+        const stateWidget = findWidgetByNames(node, ["当前执行编号"]);
+        if (stateWidget) {
+            stateWidget.readonly = true;
+            stateWidget.disabled = true;  // 彻底禁用编辑
+        }
         return true;
     }
     if (isShaobkjLoopTriggerNode(node)) {
@@ -1722,10 +1729,17 @@ app.registerExtension({
                     return;
                 }
                 widget.value = value;
+                // 触发 widget 回调，确保值被正确保存
+                if (typeof widget.callback === "function") {
+                    widget.callback(value);
+                }
                 node.setDirtyCanvas?.(true, true);
             });
-            api.addEventListener("shaobkj.add_queue", async () => {
-                await app.queuePrompt(0, 1);
+            api.addEventListener("shaobkj.add_queue", async (evt) => {
+                // 延迟一点，确保 node_feedback 已经处理完
+                setTimeout(async () => {
+                    await app.queuePrompt(0, 1);
+                }, 100);
             });
         }).catch(() => {
         });
@@ -1829,7 +1843,7 @@ app.registerExtension({
             nodeType.prototype.onWidgetChanged = function(name, value, oldValue, widget) {
                 const r = onWidgetChanged ? onWidgetChanged.apply(this, arguments) : undefined;
                 if (name === "计数开始") {
-                    const stateWidget = findWidgetByNames(this, ["当前执行编号状态"]);
+                    const stateWidget = findWidgetByNames(this, ["当前执行编号"]);
                     if (stateWidget && stateWidget.value !== value) {
                         stateWidget.value = value;
                     }

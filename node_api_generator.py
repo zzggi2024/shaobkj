@@ -370,7 +370,7 @@ class Shaobkj_GPT2Edits_Node:
         api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
         return {
             "required": {
-                "提示词": ("STRING", {"multiline": False, "dynamicPrompts": True, "tooltip": "提示词内容；有图时执行编辑，无图时执行文生图"}),
+                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "编辑内容描述，支持多行；推荐：直接填写编辑提示词"}),
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
                 "模型选择": (
