@@ -4,7 +4,7 @@ class Shaobkj_ZeroOneFloat:
         return {
             "required": {
                 "步进": (["0.1", "0.01"], {"default": "0.1"}),
-                "数值": ("FLOAT", {"default": 0.1, "min": 0.1, "max": 1.0, "step": 0.1, "round": 0.01, "display": "slider"}),
+                "数值": ("FLOAT", {"default": 0.1, "min": 0.1, "max": 1.0, "step": 0.1, "round": 0.01}),
             },
         }
 

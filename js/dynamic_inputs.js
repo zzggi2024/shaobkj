@@ -1653,10 +1653,140 @@ function sanitizeNumericWidgets(node) {
     return changed;
 }
 
+function setZeroOneFloatValue(node, valueWidget, nextValue) {
+    if (!node || !valueWidget) return false;
+    const step = Number(node.__shaobkjZeroOneFloatStep) || 0.1;
+    const digits = Number.isInteger(node.__shaobkjZeroOneFloatDigits) ? node.__shaobkjZeroOneFloatDigits : (step === 0.01 ? 2 : 1);
+    const rawText = typeof nextValue === "string" ? nextValue.trim() : nextValue;
+    const safeValue = rawText === "" ? step : Number(rawText);
+    const baseValue = Number.isFinite(safeValue) ? safeValue : step;
+    const clampedValue = Math.min(1.0, Math.max(step, baseValue));
+    const roundedValue = Number((Math.round(clampedValue / step) * step).toFixed(digits));
+    const currentNumericValue = Number(valueWidget.value);
+    if (Number.isFinite(currentNumericValue) && currentNumericValue === roundedValue) {
+        return false;
+    }
+    node.__shaobkjZeroOneFloatSyncing = true;
+    valueWidget.value = roundedValue;
+    if (typeof valueWidget.callback === "function") {
+        valueWidget.callback(roundedValue);
+    }
+    node.__shaobkjZeroOneFloatSyncing = false;
+    node.setDirtyCanvas?.(true, true);
+    return true;
+}
+
+function ensureZeroOneFloatCustomControl(node, valueWidget) {
+    if (!isShaobkjZeroOneFloatNode(node) || !valueWidget || typeof node.addDOMWidget !== "function") return false;
+    let changed = false;
+    if (setWidgetHiddenState(valueWidget, true)) {
+        changed = true;
+    }
+    valueWidget.hidden = true;
+    if (valueWidget.computeSize !== valueWidget.__shaobkjHiddenComputeSize) {
+        valueWidget.computeSize = valueWidget.__shaobkjHiddenComputeSize;
+        changed = true;
+    }
+    if (!node.__shaobkjZeroOneFloatControl) {
+        const root = document.createElement("div");
+        root.className = "shaobkj-zero-one-float-control";
+        root.style.display = "flex";
+        root.style.alignItems = "center";
+        root.style.gap = "8px";
+        root.style.width = "100%";
+
+        const minusButton = document.createElement("button");
+        minusButton.type = "button";
+        minusButton.textContent = "-";
+        minusButton.style.width = "32px";
+        minusButton.style.height = "28px";
+        minusButton.style.cursor = "pointer";
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.style.flex = "1";
+        input.style.height = "28px";
+        input.style.background = "#1f1f1f";
+        input.style.color = "#f0f0f0";
+        input.style.border = "1px solid #555";
+        input.style.borderRadius = "6px";
+        input.style.padding = "0 10px";
+        input.style.boxSizing = "border-box";
+
+        const plusButton = document.createElement("button");
+        plusButton.type = "button";
+        plusButton.textContent = "+";
+        plusButton.style.width = "32px";
+        plusButton.style.height = "28px";
+        plusButton.style.cursor = "pointer";
+
+        root.appendChild(minusButton);
+        root.appendChild(input);
+        root.appendChild(plusButton);
+
+        const applyDelta = (delta) => {
+            setZeroOneFloatValue(node, valueWidget, Number(valueWidget.value) + delta);
+            updateZeroOneFloatCustomControl(node);
+        };
+
+        minusButton.addEventListener("click", () => applyDelta(-(Number(node.__shaobkjZeroOneFloatStep) || 0.1)));
+        plusButton.addEventListener("click", () => applyDelta(Number(node.__shaobkjZeroOneFloatStep) || 0.1));
+
+        input.addEventListener("change", () => {
+            setZeroOneFloatValue(node, valueWidget, input.value);
+            updateZeroOneFloatCustomControl(node);
+        });
+        input.addEventListener("blur", () => {
+            setZeroOneFloatValue(node, valueWidget, input.value);
+            updateZeroOneFloatCustomControl(node);
+        });
+        input.addEventListener("keydown", (event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+                event.preventDefault();
+                applyDelta(-(Number(node.__shaobkjZeroOneFloatStep) || 0.1));
+            }
+            if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+                event.preventDefault();
+                applyDelta(Number(node.__shaobkjZeroOneFloatStep) || 0.1);
+            }
+            if (event.key === "Enter") {
+                setZeroOneFloatValue(node, valueWidget, input.value);
+                updateZeroOneFloatCustomControl(node);
+            }
+        });
+
+        const domWidget = node.addDOMWidget("ShaobkjZeroOneFloatControl", "shaobkj_zero_one_float_control", root);
+        domWidget.serialize = false;
+        domWidget.label = "";
+        domWidget.name = "ShaobkjZeroOneFloatControl";
+        node.__shaobkjZeroOneFloatControl = { root, input, minusButton, plusButton, domWidget };
+        changed = true;
+    }
+    return changed;
+}
+
+function updateZeroOneFloatCustomControl(node) {
+    const control = node?.__shaobkjZeroOneFloatControl;
+    const valueWidget = node?.__shaobkjZeroOneFloatValueWidget;
+    if (!control || !valueWidget) return false;
+    const step = Number(node.__shaobkjZeroOneFloatStep) || 0.1;
+    const digits = Number.isInteger(node.__shaobkjZeroOneFloatDigits) ? node.__shaobkjZeroOneFloatDigits : (step === 0.01 ? 2 : 1);
+    const value = Number(valueWidget.value);
+    const nextValue = Number.isFinite(value) ? value.toFixed(digits) : step.toFixed(digits);
+    control.input.step = String(step);
+    control.input.min = String(step);
+    control.input.max = "1";
+    if (control.input.value !== nextValue) {
+        control.input.value = nextValue;
+        return true;
+    }
+    return false;
+}
+
 function syncZeroOneFloatWidget(node) {
     if (!isShaobkjZeroOneFloatNode(node) || !Array.isArray(node.widgets)) return false;
     const stepWidget = findWidgetByNames(node, ["步进"]);
-    const valueWidget = findWidgetByNames(node, ["数值"]);
+    const valueWidget = findWidgetByNames(node, ["数值", "浮点数"]);
     if (!stepWidget || !valueWidget) return false;
 
     const useFineStep = String(stepWidget.value) === "0.01";
@@ -1664,15 +1794,20 @@ function syncZeroOneFloatWidget(node) {
     const digits = useFineStep ? 2 : 1;
     let changed = false;
 
+    node.__shaobkjZeroOneFloatStep = step;
+    node.__shaobkjZeroOneFloatDigits = digits;
+    node.__shaobkjZeroOneFloatValueWidget = valueWidget;
+
     if (!valueWidget.options) {
         valueWidget.options = {};
         changed = true;
     }
 
-    valueWidget.type = "slider";
-    valueWidget.options.display = "slider";
     valueWidget.name = "数值";
-    valueWidget.label = "数值";
+    if (valueWidget.label !== undefined) {
+        delete valueWidget.label;
+        changed = true;
+    }
 
     valueWidget.options.min = step;
     valueWidget.options.max = 1.0;
@@ -1694,9 +1829,11 @@ function syncZeroOneFloatWidget(node) {
         changed = true;
     }
 
-    const displayText = `数值: ${roundedValue.toFixed(digits)}`;
-    if (valueWidget.last_y !== undefined) {
-        valueWidget.label = displayText;
+    if (ensureZeroOneFloatCustomControl(node, valueWidget)) {
+        changed = true;
+    }
+    if (updateZeroOneFloatCustomControl(node)) {
+        changed = true;
     }
 
     if (changed) {

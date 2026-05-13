@@ -87,7 +87,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_QuickMark": "🏷️ 快速标记",
     "Shaobkj_FontStyleSelector": "🖋️ 字体风格提示词选择器",
     "Shaobkj_ImageSplit": "🧩 图像拆分",
-    "Shaobkj_ZeroOneFloat": "0-1浮点",
+    "Shaobkj_ZeroOneFloat": "🎚️ 0-1浮点",
 }
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")
