@@ -30,6 +30,8 @@ const DYNAMIC_NODES = [
     "✨ 无限提示词联结",
     "Shaobkj_ImageSplit",
     "🧩 图像拆分",
+    "Shaobkj_ZeroOneFloat",
+    "0-1浮点",
 ];
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
@@ -52,6 +54,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_Text_Process",
     "Shaobkj_InfinitePromptJoin",
     "Shaobkj_ImageSplit",
+    "Shaobkj_ZeroOneFloat",
 ];
 const MIN_INPUTS = 2;
 let started = false;
@@ -133,6 +136,9 @@ function shouldManageDynamicInputsByNodeData(nodeData) {
 function shouldManageDynamicInputsByNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
+    if (t === "Shaobkj_ZeroOneFloat" || title === "0-1浮点") {
+        return false;
+    }
     if (t && DYNAMIC_NODES.includes(t)) {
         return true;
     }
@@ -152,6 +158,12 @@ function isShaobkjImageSplitNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
     return t === "Shaobkj_ImageSplit" || (typeof title === "string" && title.includes("图像拆分"));
+}
+
+function isShaobkjZeroOneFloatNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    return t === "Shaobkj_ZeroOneFloat" || title === "0-1浮点";
 }
 
 function getImageSplitCount(node) {
@@ -1332,6 +1344,15 @@ function setupLinkWidget(node) {
     }
     const nodeType = node?.type || "";
     const nodeTitle = node?.title || "";
+    if (isShaobkjZeroOneFloatNode(node)) {
+        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
+    }
     if (isShaobkjTextProcessNode(node)) {
         const legacyIndex = node.widgets.findIndex(w => w.name === "API申请地址");
         if (legacyIndex >= 0) {
@@ -1633,6 +1654,59 @@ function sanitizeNumericWidgets(node) {
     return changed;
 }
 
+function syncZeroOneFloatWidget(node) {
+    if (!isShaobkjZeroOneFloatNode(node) || !Array.isArray(node.widgets)) return false;
+    const stepWidget = findWidgetByNames(node, ["步进"]);
+    const valueWidget = findWidgetByNames(node, ["数值"]);
+    if (!stepWidget || !valueWidget) return false;
+
+    const useFineStep = String(stepWidget.value) === "0.01";
+    const step = useFineStep ? 0.01 : 0.1;
+    const digits = useFineStep ? 2 : 1;
+    let changed = false;
+
+    if (!valueWidget.options) {
+        valueWidget.options = {};
+        changed = true;
+    }
+
+    valueWidget.type = "slider";
+    valueWidget.options.display = "slider";
+    valueWidget.name = "数值";
+    valueWidget.label = "数值";
+
+    valueWidget.options.min = step;
+    valueWidget.options.max = 1.0;
+    valueWidget.options.step = step;
+    valueWidget.options.round = step;
+    valueWidget.options.precision = digits;
+    valueWidget.options.default = step;
+    valueWidget.min = step;
+    valueWidget.max = 1.0;
+    valueWidget.step = step;
+    valueWidget.precision = digits;
+
+    const currentValue = Number(valueWidget.value);
+    const safeValue = Number.isFinite(currentValue) ? currentValue : step;
+    const clampedValue = Math.min(1.0, Math.max(step, safeValue));
+    const roundedValue = Number((Math.round(clampedValue / step) * step).toFixed(digits));
+    if (Number(valueWidget.value) !== roundedValue) {
+        valueWidget.value = roundedValue;
+        changed = true;
+    }
+
+    const displayText = `数值: ${roundedValue.toFixed(digits)}`;
+    if (valueWidget.last_y !== undefined) {
+        valueWidget.label = displayText;
+    }
+
+    if (changed) {
+        node.onResize?.(node.size);
+        node.setDirtyCanvas(true, true);
+    }
+    return changed;
+}
+
 app.registerExtension({
     name: "Shaobkj.DynamicInputs",
     async setup(app) {
@@ -1678,6 +1752,7 @@ app.registerExtension({
                     }
                     syncSeedControl(node);
                     sanitizeNumericWidgets(node);
+                    syncZeroOneFloatWidget(node);
                     if (isShaobkjImageSplitNode(node)) {
                         manageImageSplitOutputs(node);
                     } else if (shouldManageDynamicInputsByNode(node)) {
@@ -1780,6 +1855,7 @@ app.registerExtension({
                     initializeTextProcessState(this);
                     syncSeedControl(this);
                     sanitizeNumericWidgets(this);
+                    syncZeroOneFloatWidget(this);
                     // Check again, still onlyAdd=true to be safe during potential heavy load
                     if (isShaobkjImageSplitNode(this)) {
                         manageImageSplitOutputs(this);
@@ -1822,6 +1898,7 @@ app.registerExtension({
                     setupImageSaveCustomSizeMode(this);
                     setupTextProcessListMode(this);
                     setupLoadBatchImagesLocalization(this);
+                    syncZeroOneFloatWidget(this);
                     if (isShaobkjImageSplitNode(this)) {
                         manageImageSplitOutputs(this);
                     } else if (needsDynamicInputs) {
@@ -1851,6 +1928,9 @@ app.registerExtension({
                 }
                 if (name === "水平张数" || name === "垂直张数") {
                     manageImageSplitOutputs(this);
+                }
+                if (name === "步进" || name === "数值") {
+                    syncZeroOneFloatWidget(this);
                 }
                 setupNanoBananaEditingMode(this);
                 setupGrokVideoDurationMode(this);
