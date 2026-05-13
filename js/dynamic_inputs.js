@@ -136,7 +136,7 @@ function shouldManageDynamicInputsByNodeData(nodeData) {
 function shouldManageDynamicInputsByNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
-    if (t === "Shaobkj_ZeroOneFloat" || title === "0-1浮点") {
+    if (t === "Shaobkj_ZeroOneFloat") {
         return false;
     }
     if (t && DYNAMIC_NODES.includes(t)) {
@@ -162,8 +162,7 @@ function isShaobkjImageSplitNode(node) {
 
 function isShaobkjZeroOneFloatNode(node) {
     const t = node?.type || "";
-    const title = node?.title || "";
-    return t === "Shaobkj_ZeroOneFloat" || title === "0-1浮点";
+    return t === "Shaobkj_ZeroOneFloat";
 }
 
 function getImageSplitCount(node) {
