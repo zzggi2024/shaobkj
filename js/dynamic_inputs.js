@@ -1836,6 +1836,16 @@ function syncZeroOneFloatWidget(node) {
         changed = true;
     }
 
+    const controlWidget = node.__shaobkjZeroOneFloatControl?.domWidget;
+    const stepIndex = node.widgets.indexOf(stepWidget);
+    const controlIndex = controlWidget ? node.widgets.indexOf(controlWidget) : -1;
+    if (stepIndex >= 0 && controlIndex >= 0 && stepIndex < controlIndex) {
+        node.widgets.splice(stepIndex, 1);
+        const nextControlIndex = node.widgets.indexOf(controlWidget);
+        node.widgets.splice(nextControlIndex + 1, 0, stepWidget);
+        changed = true;
+    }
+
     if (changed) {
         node.onResize?.(node.size);
         node.setDirtyCanvas(true, true);
