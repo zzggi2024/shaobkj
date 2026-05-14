@@ -1461,6 +1461,15 @@ function setupLinkWidget(node) {
         }
         return false;
     }
+    if (nodeType === "Shaobkj_CustomVideoSave" || (typeof nodeTitle === "string" && nodeTitle.includes("视频保存-少白科技"))) {
+        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
+    }
     const index = node.widgets.findIndex(w => w.name === "API申请地址");
     const defaultUrl = "https://yhmx.work/login?expired=true";
 

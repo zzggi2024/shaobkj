@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 
 import folder_paths
 from comfy.cli_args import args
@@ -23,8 +24,7 @@ class Shaobkj_CustomVideoSave:
             },
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("保存路径",)
+    RETURN_TYPES = ()
     FUNCTION = "save_video"
     OUTPUT_NODE = True
     CATEGORY = "🤖shaobkj-APIbox/实用工具"
@@ -48,6 +48,29 @@ class Shaobkj_CustomVideoSave:
             if not os.path.exists(target):
                 return target
             index += 1
+
+    @staticmethod
+    def _preview_entry(output_path):
+        output_dir = os.path.abspath(folder_paths.get_output_directory())
+        temp_dir = os.path.abspath(folder_paths.get_temp_directory())
+        abs_path = os.path.abspath(output_path)
+        filename = os.path.basename(abs_path)
+
+        try:
+            rel = os.path.relpath(abs_path, output_dir)
+            if not rel.startswith("..") and not os.path.isabs(rel):
+                subfolder = os.path.dirname(rel).replace("\\", "/")
+                return {"filename": filename, "subfolder": subfolder, "type": "output"}
+        except ValueError:
+            pass
+
+        preview_name = filename
+        preview_path = os.path.join(temp_dir, preview_name)
+        if os.path.abspath(preview_path) != abs_path:
+            preview_path = Shaobkj_CustomVideoSave._unique_path(temp_dir, os.path.splitext(filename)[0], os.path.splitext(filename)[1].lstrip(".") or "mp4")
+            shutil.copyfile(abs_path, preview_path)
+            preview_name = os.path.basename(preview_path)
+        return {"filename": preview_name, "subfolder": "", "type": "temp"}
 
     def save_video(self, video, 保存目录, 视频名称, format, codec, prompt=None, extra_pnginfo=None):
         output_dir = os.path.abspath(os.path.expandvars(os.path.expanduser(str(保存目录 or "").strip())))
@@ -76,4 +99,4 @@ class Shaobkj_CustomVideoSave:
             codec=codec,
             metadata=saved_metadata,
         )
-        return (output_path,)
+        return {"ui": {"images": [self._preview_entry(output_path)], "animated": (True,)}}

@@ -86,7 +86,7 @@ class Shaobkj_Grok_Video:
                 ),
                 "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
                 "提示词": ("STRING", {"multiline": True, "default": "让主体自然动起来，增加轻微运镜和环境动态", "tooltip": "视频内容描述；推荐：简洁具体"}),
-                "分辨率": (["HD", "SD"], {"default": "HD", "tooltip": "video_config.resolution；推荐：HD(720p) 或 SD(480p)"}),
+                "分辨率": (["HD", "SD"], {"default": "HD", "tooltip": "video_config.resolution；HD=720p，SD=480p，最终以接口返回为准"}),
                 "画幅比例": (["16:9", "9:16", "1:1", "2:3", "3:2"], {"default": "16:9", "tooltip": "video_config.aspect_ratio；推荐：16:9 / 9:16"}),
                 "生成时长": (["6", "10", "15", "20", "30"], {"default": "6", "tooltip": "生成时长需与模型匹配；20/30 秒模型将自动锁定时长"}),
                 "预设": (["normal"], {"default": "normal", "tooltip": "video_config.preset；当前文档示例为 normal"}),
@@ -149,7 +149,8 @@ class Shaobkj_Grok_Video:
             final_duration = 6
 
         aspect_ratio_value = str(画幅比例).strip()
-        resolution_value = "720P" if str(分辨率).strip().upper() == "HD" else "480P"
+        resolution_label = "HD" if str(分辨率).strip().upper() == "HD" else "SD"
+        resolution_value = "720P" if resolution_label == "HD" else "480P"
 
         reference_images = []
         for value in (参考图1, 参考图2):
@@ -196,12 +197,14 @@ class Shaobkj_Grok_Video:
             "video_config": {
                 "duration": final_duration,
                 "aspect_ratio": aspect_ratio_value,
-                "resolution": str(分辨率).strip().upper(),
+                "resolution": resolution_label,
+                "quality": resolution_label,
                 "preset": str(预设).strip() or "normal",
             },
             "duration": final_duration,
             "aspect_ratio": aspect_ratio_value,
-            "resolution": str(分辨率).strip().upper(),
+            "resolution": resolution_label,
+            "quality": resolution_label,
         }
         if int(seed) > 0:
             payload["seed"] = int(seed)
