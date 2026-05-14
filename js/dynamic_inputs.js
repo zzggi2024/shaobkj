@@ -3,7 +3,9 @@ import { app } from "/scripts/app.js";
 
 const DYNAMIC_NODES = [
     "Shaobkj_APINode",
+    "Shaobkj_TestAPINode",
     "🤖图像生成",
+    "🧪测试API",
     "Shaobkj_GPT2Edits_Node",
     "🖼️ gpt-2-Edits",
     "Shaobkj_Sora_Video", 
@@ -24,6 +26,10 @@ const DYNAMIC_NODES = [
     "🤖并发-编辑-文本驱动",
     "Shaobkj_LLM_App",
     "🤖LLM应用",
+    "Shaobkj_LLM_Test_API",
+    "🧪LLM-测试API",
+    "Shaobkj_Media_Reverse_Prompt",
+    "🔍视频/图片-反推",
     "Shaobkj_NanoBanana_Prompt",
     "🤖香蕉专属提示词",
     "Shaobkj_InfinitePromptJoin",
@@ -35,6 +41,7 @@ const DYNAMIC_NODES = [
 ];
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
+    "Shaobkj_TestAPINode",
     "Shaobkj_APINode_Batch",
     "Shaobkj_GPT2Edits_Node",
     "Shaobkj_Sora_Video",
@@ -45,6 +52,8 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_ConcurrentImageEdit_Sender",
     "Shaobkj_GroupedConcurrentImageEdit",
     "Shaobkj_LLM_App",
+    "Shaobkj_LLM_Test_API",
+    "Shaobkj_Media_Reverse_Prompt",
     "Shaobkj_NanoBanana_Prompt",
     "Shaobkj_Load_Image_Path",
     "Shaobkj_Load_Batch_Images",
@@ -68,12 +77,20 @@ const CONTROL_WIDGET_NAME = "control_after_generate";
 const THEME_CONFIG = {
     // 🔮 创世系列 (图像生成) - Electric Violet
     "Shaobkj_APINode": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_TestAPINode": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_APINode_Batch": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_GPT2Edits_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_LLM_App": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_LLM_Test_API": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_Media_Reverse_Prompt": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🧪测试API": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖并发-编辑-文本驱动": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🖼️ gpt-2-Edits": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🤖LLM应用": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🧪LLM-测试API": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "🔍视频/图片-反推": { color: "#7D24A6", bgcolor: "#1E0A29" },
 
     // 🎬 导演系列 (视频生成) - Future Blue
     "Shaobkj_Sora_Video": { color: "#0091EA", bgcolor: "#001A2E" },
@@ -124,6 +141,9 @@ function getThemeForNode(node) {
 function shouldManageDynamicInputsByNodeData(nodeData) {
     const name = nodeData?.name || "";
     const displayName = nodeData?.display_name || nodeData?.displayName || "";
+    if (name === "Shaobkj_Media_Reverse_Prompt" || displayName === "🔍视频/图片-反推") {
+        return false;
+    }
     if (DYNAMIC_NODES.includes(name)) {
         return true;
     }
@@ -136,7 +156,10 @@ function shouldManageDynamicInputsByNodeData(nodeData) {
 function shouldManageDynamicInputsByNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
-    if (t === "Shaobkj_ZeroOneFloat") {
+    if (t === "Shaobkj_ZeroOneFloat" || t === "Shaobkj_Media_Reverse_Prompt") {
+        return false;
+    }
+    if (title && typeof title === "string" && title.includes("视频/图片-反推")) {
         return false;
     }
     if (t && DYNAMIC_NODES.includes(t)) {

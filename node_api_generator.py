@@ -686,18 +686,31 @@ class Shaobkj_APINode:
             16/9: "16:9",
             21/9: "21:9"
         }
-        
+
         # Find closest
         closest_dist = float('inf')
         closest_str = "1:1"
-        
+
         for r_val, r_str in standards.items():
             dist = abs(ratio - r_val)
             if dist < closest_dist:
                 closest_dist = dist
                 closest_str = r_str
-                
+
         return closest_str
+
+    def resolve_model_name(self, 模型选择, 分辨率):
+        model = str(模型选择).strip() if isinstance(模型选择, str) else str(模型选择)
+        if not model:
+            raise ValueError("模型选择不能为空。")
+        if model == "智能加载":
+            resolution_key = str(分辨率).lower()
+            if resolution_key == "2k":
+                return "gemini-3-pro-image-preview-2k"
+            elif resolution_key == "4k":
+                return "gemini-3-pro-image-preview-4k"
+            return "gemini-3-pro-image-preview"
+        return model
 
     def generate_image(self, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 提示词, 图片比例, 接收模式, 主体文本, 保存格式, 等待时间, seed, **kwargs):
         api_key = API密钥
@@ -719,15 +732,7 @@ class Shaobkj_APINode:
         if not api_key:
             raise ValueError("API Key is required.")
 
-        model = 模型选择
-        if model == "智能加载":
-            resolution_key = str(resolution).lower()
-            if resolution_key == "2k":
-                model = "gemini-3-pro-image-preview-2k"
-            elif resolution_key == "4k":
-                model = "gemini-3-pro-image-preview-4k"
-            else:
-                model = "gemini-3-pro-image-preview"
+        model = self.resolve_model_name(模型选择, resolution)
 
         # Fix: Remove Authorization header for Gemini to improve proxy compatibility (align with ModeHub)
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
@@ -1229,9 +1234,31 @@ class Shaobkj_APINode:
             pbar.update_absolute(100)
 
 
-# ----------------------------------------------------------------------------
-# Background Worker for Text-to-Image Batch
-# ----------------------------------------------------------------------------
+class Shaobkj_TestAPINode(Shaobkj_APINode):
+    @classmethod
+    def INPUT_TYPES(s):
+        api_key_default = get_config_value("API_KEY", "SHAOBKJ_API_KEY", "")
+        return {
+            "required": {
+                "提示词": ("STRING", {"multiline": True, "dynamicPrompts": True, "tooltip": "生成内容描述，支持多行；推荐：每行一条提示词"}),
+                "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
+                "模型选择": ("STRING", {"default": "gemini-3-pro-image-preview", "multiline": False, "tooltip": "支持自定义模型名；输入 智能加载 时按分辨率自动选择模型"}),
+                "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
+                "分辨率": (["1k", "2k", "4k"], {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"}),
+                "图片比例": (
+                    ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "原图1比例"],
+                    {"default": "原图1比例", "tooltip": "输出画面比例；推荐：原图1比例"},
+                ),
+                "接收模式": (["智能模式", "URL", "B64"], {"default": "智能模式", "tooltip": "API 返回内容处理方式；推荐：智能模式"}),
+                "主体文本": ("STRING", {"default": "", "multiline": False, "tooltip": "主体识别裁切关键词；推荐：留空"}),
+                "保存格式": (["JPEG (默认95%)", "PNG (无损)", "WEBP (无损)"], {"default": "JPEG (默认95%)", "tooltip": "输出保存格式；推荐：JPEG (默认95%)"}),
+                "输入图像-长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
+                "等待时间": ("INT", {"default": 180, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0为无限等待；推荐：180"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 2147483647, "tooltip": "随机种子；推荐：0"}),
+                "API申请地址": ("STRING", {"default": "https://yhmx.work/login?expired=true", "multiline": False, "tooltip": "API 申请入口；推荐：默认地址"}),
+            },
+        }
 
 def snap_to_aspect_ratio(ratio):
     """

@@ -1,11 +1,11 @@
-from .node_api_generator import Shaobkj_APINode, Shaobkj_APINode_Batch, Shaobkj_GPT2Edits_Node, Shaobkj_GPTImage2_Batch_Node
+from .node_api_generator import Shaobkj_APINode, Shaobkj_TestAPINode, Shaobkj_APINode_Batch, Shaobkj_GPT2Edits_Node, Shaobkj_GPTImage2_Batch_Node
 from .node_video import Shaobkj_Sora_Video
 from .node_veo_video import Shaobkj_Veo_Video
 from .node_sd20_video import Shaobkj_SD20_Video
 from .node_grok_video import Shaobkj_Grok_Video
 from .node_grok3_video import Shaobkj_Grok3_Video
 from .node_concurrent_image_edit import Shaobkj_ConcurrentImageEdit_Sender, Shaobkj_GroupedConcurrentImageEdit, Shaobkj_Load_Image_Path, Shaobkj_Load_Batch_Images, Shaobkj_Image_Save, Shaobkj_Fixed_Seed
-from .node_llm_app import Shaobkj_LLM_App, Shaobkj_NanoBanana_Prompt
+from .node_llm_app import Shaobkj_LLM_App, Shaobkj_LLM_Test_API, Shaobkj_Media_Reverse_Prompt, Shaobkj_NanoBanana_Prompt
 from .node_loop import Shaobkj_ForLoop_Start, Shaobkj_ForLoop_End, Shaobkj_Loop_Trigger
 from .node_load_image_list import Shaobkj_LoadImageListFromDir
 from .node_resolution_judge import Shaobkj_ResolutionJudge, Shaobkj_GetEdgeLength
@@ -17,9 +17,11 @@ from .node_quick_mark import Shaobkj_QuickMark
 from .node_font_style_selector import Shaobkj_FontStyleSelector
 from .node_image_split import Shaobkj_ImageSplit
 from .node_zero_one_float import Shaobkj_ZeroOneFloat
+from .node_custom_video_save import Shaobkj_CustomVideoSave
 
 NODE_CLASS_MAPPINGS = {
     "Shaobkj_APINode": Shaobkj_APINode,
+    "Shaobkj_TestAPINode": Shaobkj_TestAPINode,
     "Shaobkj_APINode_Batch": Shaobkj_APINode_Batch,
     "Shaobkj_GPT2Edits_Node": Shaobkj_GPT2Edits_Node,
     "Shaobkj_GPTImage2_Batch_Node": Shaobkj_GPTImage2_Batch_Node,
@@ -35,6 +37,8 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_Image_Save": Shaobkj_Image_Save,
     "Shaobkj_Fixed_Seed": Shaobkj_Fixed_Seed,
     "Shaobkj_LLM_App": Shaobkj_LLM_App,
+    "Shaobkj_LLM_Test_API": Shaobkj_LLM_Test_API,
+    "Shaobkj_Media_Reverse_Prompt": Shaobkj_Media_Reverse_Prompt,
     "Shaobkj_ForLoop_Start": Shaobkj_ForLoop_Start,
     "Shaobkj_ForLoop_End": Shaobkj_ForLoop_End,
     "Shaobkj_Loop_Trigger": Shaobkj_Loop_Trigger,
@@ -52,10 +56,12 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_FontStyleSelector": Shaobkj_FontStyleSelector,
     "Shaobkj_ImageSplit": Shaobkj_ImageSplit,
     "Shaobkj_ZeroOneFloat": Shaobkj_ZeroOneFloat,
+    "Shaobkj_CustomVideoSave": Shaobkj_CustomVideoSave,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_APINode": "🤖图像生成",
+    "Shaobkj_TestAPINode": "🧪测试API",
     "Shaobkj_APINode_Batch": "🤖并发-编辑-文本驱动",
     "Shaobkj_GPT2Edits_Node": "🖼️ gpt-2-Edits",
     "Shaobkj_GPTImage2_Batch_Node": "🖼️ gpt-image-2 文本驱动并发",
@@ -71,6 +77,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_Image_Save": "🤖图像保存",
     "Shaobkj_Fixed_Seed": "🤖固定随机种子",
     "Shaobkj_LLM_App": "🤖LLM应用",
+    "Shaobkj_LLM_Test_API": "🧪LLM-测试API",
+    "Shaobkj_Media_Reverse_Prompt": "🔍视频/图片-反推",
     "Shaobkj_ForLoop_Start": "🤖循环开始",
     "Shaobkj_ForLoop_End": "🤖循环结束",
     "Shaobkj_Loop_Trigger": "🔁循环触发",
@@ -88,6 +96,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_FontStyleSelector": "🖋️ 字体风格提示词选择器",
     "Shaobkj_ImageSplit": "🧩 图像拆分",
     "Shaobkj_ZeroOneFloat": "🎚️ 0-1浮点",
+    "Shaobkj_CustomVideoSave": "🎬 视频保存-少白科技",
 }
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")
