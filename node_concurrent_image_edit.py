@@ -1676,9 +1676,13 @@ class Shaobkj_Image_Save:
             preview_img = None
             try:
                 with Image.open(out_path) as saved_img:
-                    preview_img = ImageOps.exif_transpose(saved_img).convert("RGB")
+                    saved_img = ImageOps.exif_transpose(saved_img)
+                    if saved_img.mode in ("RGBA", "LA") or "transparency" in saved_img.info:
+                        preview_img = saved_img.convert("RGBA")
+                    else:
+                        preview_img = saved_img.convert("RGB")
             except Exception:
-                preview_img = pil_img.convert("RGB")
+                preview_img = pil_img.convert("RGBA") if pil_img.mode in ("RGBA", "LA") else pil_img.convert("RGB")
             preview_images.append((preview_img, preview_base))
 
         if 预览:

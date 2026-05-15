@@ -150,7 +150,6 @@ class Shaobkj_Grok_Video:
 
         aspect_ratio_value = str(画幅比例).strip()
         resolution_label = "HD" if str(分辨率).strip().upper() == "HD" else "SD"
-        resolution_value = "720P" if resolution_label == "HD" else "480P"
 
         reference_images = []
         for value in (参考图1, 参考图2):
@@ -198,19 +197,14 @@ class Shaobkj_Grok_Video:
                 "duration": final_duration,
                 "aspect_ratio": aspect_ratio_value,
                 "resolution": resolution_label,
-                "quality": resolution_label,
                 "preset": str(预设).strip() or "normal",
             },
-            "duration": final_duration,
-            "aspect_ratio": aspect_ratio_value,
-            "resolution": resolution_label,
-            "quality": resolution_label,
         }
         if int(seed) > 0:
             payload["seed"] = int(seed)
         print(
             f"[Shaobkj-Grok] submit model={model_name}, aspect_ratio={aspect_ratio_value}, "
-            f"resolution={resolution_value}, duration={final_duration}, refs={len(image_refs)}"
+            f"resolution={resolution_label}, duration={final_duration}, refs={len(image_refs)}"
         )
         print(f"[Shaobkj-Grok] submit payload={sanitize_text(json.dumps(payload, ensure_ascii=False), max_len=2000)}")
 
