@@ -47,12 +47,13 @@ class Shaobkj_Grok3_Video:
         return {
             "required": {
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
-                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "NEW API / OpenAI-compatible 地址；固定推荐：https://yhmx.work"}),
-                "模型": (["grok-video-3"], {"default": "grok-video-3", "tooltip": "Grok3 视频模型；推荐：grok-video-3"}),
+                "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "视频 API 网关地址；会自动请求 /v1/video/create；推荐：https://yhmx.work"}),
+                "模型": (["grok-video-3", "自定义"], {"default": "grok-video-3", "tooltip": "Grok3 视频模型；选择‘自定义’后可手动填写模型名称"}),
+                "自定义模型名称": ("STRING", {"default": "", "multiline": False, "tooltip": "当‘模型’选择‘自定义’时生效；请输入实际模型名称"}),
                 "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
                 "提示词": ("STRING", {"multiline": True, "default": "让主体自然动起来，增加轻微运镜和环境动态", "tooltip": "视频内容描述；推荐：简洁具体"}),
                 "画幅比例": (["2:3", "3:2", "16:9", "9:16", "1:1"], {"default": "1:1", "tooltip": "视频画幅比例；推荐：1:1 / 16:9 / 9:16"}),
-                "生成时长": (["6", "10", "15"], {"default": "15", "tooltip": "视频时长；会同时写入 video_config / duration / duration_seconds / prompt"}),
+                "生成时长": (["6", "10", "15"], {"default": "15", "tooltip": "视频时长；会写入 duration 字段"}),
                 "分辨率": (["480P", "720P", "1080P"], {"default": "1080P", "tooltip": "视频分辨率；推荐：1080P"}),
                 "输入图像_长边设置": (["1024", "1280", "1536"], {"default": "1280", "tooltip": "输入图像长边缩放；推荐：1280"}),
                 "等待时间": ("INT", {"default": 0, "min": 0, "max": 1000000, "tooltip": "轮询等待时间(秒)，0 为无限等待；推荐：0"}),
@@ -75,6 +76,7 @@ class Shaobkj_Grok3_Video:
         API密钥,
         API地址,
         模型,
+        自定义模型名称,
         使用系统代理,
         提示词,
         画幅比例,
@@ -97,7 +99,7 @@ class Shaobkj_Grok3_Video:
         base_url = str(API地址 or "https://yhmx.work").rstrip("/")
         root_base = base_url[:-3] if base_url.endswith("/v1") else base_url
         submit_base = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
-        submit_url = f"{submit_base}/chat/completions"
+        submit_url = f"{submit_base}/video/create"
         api_origin = urlparse(root_base).netloc
 
         headers = {
@@ -131,34 +133,21 @@ class Shaobkj_Grok3_Video:
                 raise RuntimeError(f"参考图{idx}编码失败")
             image_urls.append(image_data_url)
 
-        model_name = str(模型).strip()
+        model_name = str(自定义模型名称).strip() if str(模型).strip() == "自定义" else str(模型).strip()
+        if not model_name:
+            raise ValueError("请选择模型或填写自定义模型名称。")
         duration_value = int(生成时长)
         aspect_ratio_value = str(画幅比例).strip()
         resolution_value = str(分辨率).strip().upper()
         prompt_text = str(提示词).strip()
 
-        openai_content = []
-        for image_data_url in image_urls:
-            openai_content.append({"type": "image_url", "image_url": {"url": image_data_url}})
-        openai_content.append({"type": "text", "text": prompt_text})
-
         payload = {
             "model": model_name,
-            "messages": [{"role": "user", "content": openai_content}],
-            "stream": False,
             "prompt": prompt_text,
+            "images": image_urls,
             "ratio": aspect_ratio_value,
             "duration": duration_value,
             "resolution": resolution_value,
-            "images": image_urls,
-            "video_config": {
-                "duration": duration_value,
-                "aspect_ratio": aspect_ratio_value,
-                "resolution": resolution_value,
-                "preset": "normal",
-            },
-            "duration_seconds": duration_value,
-            "aspect_ratio": aspect_ratio_value,
         }
         if int(seed) > 0:
             payload["seed"] = int(seed)
@@ -191,7 +180,7 @@ class Shaobkj_Grok3_Video:
         try:
             submit_payload = resp.json()
         except Exception as e:
-            raise RuntimeError(f"提交响应不是JSON，请确认 API地址 为 OpenAI-compatible /v1 网关：{resp.text[:1000]}") from e
+            raise RuntimeError(f"提交响应不是JSON，请确认 API地址 的 /v1/video/create 接口可用：{resp.text[:1000]}") from e
 
         print(f"[Shaobkj-Grok3] submit response={sanitize_text(self._stringify_payload(submit_payload), max_len=2000)}")
         video_url = self._find_video_url(submit_payload)
