@@ -212,8 +212,8 @@ class Shaobkj_GPT2Edits_Node:
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
                 "模型选择": (
-                    ["gpt-image-2", "gpt-image-2-all"],
-                    {"default": "gpt-image-2", "tooltip": "图像编辑模型；推荐：gpt-image-2"},
+                    ["gpt-image-2-all"],
+                    {"default": "gpt-image-2-all", "tooltip": "图像编辑模型；推荐：gpt-image-2-all"},
                 ),
                 "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
                 "分辨率": (
@@ -2144,8 +2144,8 @@ class Shaobkj_GPTImage2_Batch_Node:
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
                 "模型选择": (
-                    ["gpt-image-2", "gpt-image-2-all"],
-                    {"default": "gpt-image-2", "tooltip": "图像生成模型；推荐：gpt-image-2"},
+                    ["gpt-image-2-all"],
+                    {"default": "gpt-image-2-all", "tooltip": "图像生成模型；推荐：gpt-image-2-all"},
                 ),
                 "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
                 "分辨率": (["1k", "2k", "4k"], {"default": "1k", "tooltip": "输出分辨率档位；推荐：1k"}),
