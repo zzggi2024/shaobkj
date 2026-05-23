@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import os
 
 import torch
@@ -141,7 +141,7 @@ class Shaobkj_ForLoop_Start:
     RETURN_NAMES = ("索引", "总数", "初始值")
     OUTPUT_IS_LIST = (True, False, False)
     FUNCTION = "execute"
-    CATEGORY = "🤖shaobkj-APIbox/Logic"
+    CATEGORY = "🤖shaobkj-APlbox/Logic"
 
     def execute(self, 循环次数, 起始索引, 初始值=None):
         # Generate indices list [start, ..., start+total-1]
@@ -168,7 +168,7 @@ class Shaobkj_ForLoop_End:
     INPUT_IS_LIST = True
     OUTPUT_IS_LIST = (True,)
     FUNCTION = "execute"
-    CATEGORY = "🤖shaobkj-APIbox/Logic"
+    CATEGORY = "🤖shaobkj-APlbox/Logic"
 
     def execute(self, 输入数据):
         # 输入数据 is already a list of results from the batch execution
@@ -194,7 +194,7 @@ class Shaobkj_Loop_Trigger:
     RETURN_TYPES = ("INT", "INT")
     RETURN_NAMES = ("执行计数", "总数")
     FUNCTION = "execute"
-    CATEGORY = "🤖shaobkj-APIbox/Logic"
+    CATEGORY = "🤖shaobkj-APlbox/Logic"
     OUTPUT_NODE = True
 
     def execute(self, 文件夹路径, 强制循环数, 总数, mode, 当前执行编号, unique_id):

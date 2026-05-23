@@ -1,4 +1,4 @@
-import json
+﻿import json
 from pathlib import Path
 import re
 from urllib.parse import quote
@@ -83,7 +83,7 @@ async def shaobkj_font_styles_image(request):
 
 
 class Shaobkj_FontStyleSelector:
-    CATEGORY = "🤖shaobkj-APIbox/提示词"
+    CATEGORY = "🤖shaobkj-APlbox/提示词"
     FUNCTION = "build_prompt"
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("提示词",)

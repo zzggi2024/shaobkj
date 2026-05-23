@@ -1,4 +1,4 @@
-import os
+﻿import os
 
 import folder_paths
 import numpy as np
@@ -73,7 +73,7 @@ def _build_split_intervals(image_uint8, count, axis, mode):
 
 
 class Shaobkj_ImageSplit:
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
     FUNCTION = "split_image"
     MAX_SPLIT_OUTPUTS = 64
     RETURN_TYPES = tuple("IMAGE" for _ in range(MAX_SPLIT_OUTPUTS))

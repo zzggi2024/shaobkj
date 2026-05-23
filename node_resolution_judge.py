@@ -1,4 +1,4 @@
-import torch
+﻿import torch
 import torch.nn.functional as F
 
 
@@ -22,7 +22,7 @@ class Shaobkj_ResolutionJudge:
     RETURN_TYPES = ("BOOLEAN", "IMAGE", "MASK", "INT", "INT")
     RETURN_NAMES = ("是否超出", "阈值图像", "阈值遮罩", "宽", "高")
     FUNCTION = "judge_resolution"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     def judge_resolution(self, 图像, 阈值, 阈值缩放边, 保持原图, 取整倍数, 取整模式, 遮罩=None):
         if not isinstance(图像, torch.Tensor):
@@ -126,7 +126,7 @@ class Shaobkj_GetEdgeLength:
     RETURN_TYPES = ("INT",)
     RETURN_NAMES = ("边长",)
     FUNCTION = "get_edge_length"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     def get_edge_length(self, 图像, 边长选择):
         if not isinstance(图像, torch.Tensor):

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 import json
 from unittest.mock import patch
@@ -378,7 +378,7 @@ class Shaobkj_Load_Florence2_Model:
     RETURN_TYPES = ("FLORENCE2",)
     RETURN_NAMES = ("Florence2模型",)
     FUNCTION = "load"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     def load(self, 模型版本):
         if self.model_bundle is None or self.version != 模型版本:
@@ -409,7 +409,7 @@ class Shaobkj_Florence2_Fast_Prompt:
     RETURN_TYPES = ("STRING", "IMAGE")
     RETURN_NAMES = ("提示词", "预览图")
     FUNCTION = "run"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     @classmethod
     def IS_CHANGED(cls, Florence2模型, 图像, 任务, 文本输入, 最大新token, 束搜索数, seed):

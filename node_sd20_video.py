@@ -1,4 +1,4 @@
-import io
+﻿import io
 import json
 import mimetypes
 import os
@@ -76,7 +76,7 @@ class Shaobkj_SD20_Video:
     RETURN_TYPES = ("VIDEO", "STRING", "STRING", "STRING", "IMAGE")
     RETURN_NAMES = ("video", "任务ID", "API响应", "视频链接", "末帧图像")
     FUNCTION = "generate_video"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def generate_video(
         self,

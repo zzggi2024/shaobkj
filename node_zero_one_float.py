@@ -1,4 +1,4 @@
-class Shaobkj_ZeroOneFloat:
+﻿class Shaobkj_ZeroOneFloat:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -11,7 +11,7 @@ class Shaobkj_ZeroOneFloat:
     RETURN_TYPES = ("FLOAT",)
     RETURN_NAMES = ("浮点数",)
     FUNCTION = "get_value"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     def get_value(self, 步进, 数值):
         step_value = 0.01 if str(步进) == "0.01" else 0.1

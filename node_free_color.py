@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import io
 
 import numpy as np
@@ -11,7 +11,7 @@ from .shaobkj_shared import tensor_to_pil
 
 
 class Shaobkj_FreeColor:
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
     FUNCTION = "apply_free_color"
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)

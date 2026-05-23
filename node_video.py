@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import requests
 import time
@@ -58,7 +58,7 @@ class Shaobkj_Sora_Video:
     RETURN_TYPES = ("VIDEO", "STRING")
     RETURN_NAMES = ("video", "API响应")
     FUNCTION = "generate_video"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def generate_video(self, API密钥, API地址, 模型, 使用系统代理, 任务类型, 提示词, 生成时长, 分辨率, 长边设置, 等待时间, seed, 参考图=None, 角色视频URL="", 角色时间戳="", **kwargs):
         if not API密钥:

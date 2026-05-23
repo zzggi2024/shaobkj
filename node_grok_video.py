@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import io
 import json
 import os
@@ -105,7 +105,7 @@ class Shaobkj_Grok_Video:
     RETURN_TYPES = ("VIDEO", "STRING", "STRING", "STRING")
     RETURN_NAMES = ("video", "任务ID", "API响应", "视频链接")
     FUNCTION = "generate_video"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def generate_video(
         self,

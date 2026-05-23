@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import torch
 import numpy as np
@@ -263,7 +263,7 @@ class Shaobkj_GPT2Edits_Node:
     RETURN_TYPES = ("IMAGE", "STRING")
     RETURN_NAMES = ("图像", "API响应")
     FUNCTION = "edit_image"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def edit_image(
         self,
@@ -667,7 +667,7 @@ class Shaobkj_APINode:
     RETURN_TYPES = ("IMAGE", "STRING")
     RETURN_NAMES = ("图像", "API响应")
     FUNCTION = "generate_image"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def snap_to_aspect_ratio(self, ratio):
         """
@@ -1733,7 +1733,7 @@ class Shaobkj_APINode_Batch:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("任务ID列表", "提交状态")
     FUNCTION = "generate_images_batch"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
     OUTPUT_NODE = True
 
     def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 主体文本, 输入图像_长边设置=1280, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="JPEG (默认95%)", 最大并发数=5, 并发间隔=1.0, 提示词列表=False, **kwargs):
@@ -2181,7 +2181,7 @@ class Shaobkj_GPTImage2_Batch_Node:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("任务ID列表", "提交状态")
     FUNCTION = "generate_images_batch"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
     OUTPUT_NODE = True
 
     def generate_images_batch(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 返回格式, 输入图像_长边设置=1280, 等待时间=180, 出图数量=1, 指定文件名="", seed=0, Batch拆分模式=True, Batch对齐方式="循环补全(Max)", 保存路径="Shaobkj_Concurrent", 保存格式="PNG (无损)", 最大并发数=5, 并发间隔=1.0, 提示词列表=False, **kwargs):

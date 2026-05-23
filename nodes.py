@@ -18,8 +18,11 @@ from .node_font_style_selector import Shaobkj_FontStyleSelector
 from .node_image_split import Shaobkj_ImageSplit
 from .node_zero_one_float import Shaobkj_ZeroOneFloat
 from .node_custom_video_save import Shaobkj_CustomVideoSave
+from .node_doubao_image import Shaobkj_Doubao_Image
+from .node_param_extract import Shaobkj_ParamExtract
 
 NODE_CLASS_MAPPINGS = {
+
     "Shaobkj_APINode": Shaobkj_APINode,
     "Shaobkj_TestAPINode": Shaobkj_TestAPINode,
     "Shaobkj_APINode_Batch": Shaobkj_APINode_Batch,
@@ -30,6 +33,7 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_SD20_Video": Shaobkj_SD20_Video,
     "Shaobkj_Grok_Video": Shaobkj_Grok_Video,
     "Shaobkj_Grok3_Video": Shaobkj_Grok3_Video,
+    "Shaobkj_Grok3_Video_Generate": Shaobkj_Grok3_Video,
     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
     "Shaobkj_GroupedConcurrentImageEdit": Shaobkj_GroupedConcurrentImageEdit,
     "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
@@ -57,7 +61,10 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_ImageSplit": Shaobkj_ImageSplit,
     "Shaobkj_ZeroOneFloat": Shaobkj_ZeroOneFloat,
     "Shaobkj_CustomVideoSave": Shaobkj_CustomVideoSave,
+    "Shaobkj_Doubao_Image": Shaobkj_Doubao_Image,
+    "Shaobkj_ParamExtract": Shaobkj_ParamExtract,
 }
+
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_APINode": "🤖图像生成",
@@ -70,6 +77,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_SD20_Video": "🎬 SD_2.0视频",
     "Shaobkj_Grok_Video": "🎬 Grok视频",
     "Shaobkj_Grok3_Video": "🎬 Grok3 Video",
+    "Shaobkj_Grok3_Video_Generate": "🎬 shaobkj-grok-3视频生成",
     "Shaobkj_ConcurrentImageEdit_Sender": "🤖并发-编辑-图像驱动",
     "Shaobkj_GroupedConcurrentImageEdit": "🧩组合并发",
     "Shaobkj_Load_Image_Path": "🤖加载图像",
@@ -97,6 +105,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_ImageSplit": "🧩 图像拆分",
     "Shaobkj_ZeroOneFloat": "🎚️ 0-1浮点",
     "Shaobkj_CustomVideoSave": "🎬 视频保存-少白科技",
+    "Shaobkj_Doubao_Image": "🎨 豆包图像生成",
+    "Shaobkj_ParamExtract": "🧩 shaobkj-参数提取",
 }
+
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")

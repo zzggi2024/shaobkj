@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 import shutil
 
@@ -27,7 +27,7 @@ class Shaobkj_CustomVideoSave:
     RETURN_TYPES = ()
     FUNCTION = "save_video"
     OUTPUT_NODE = True
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     @staticmethod
     def _safe_filename(name):

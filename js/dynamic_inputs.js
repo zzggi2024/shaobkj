@@ -13,11 +13,15 @@ const DYNAMIC_NODES = [
     "Shaobkj_SD20_Video",
     "Shaobkj_Grok_Video",
     "Shaobkj_Grok3_Video",
+    "Shaobkj_Grok3_Video_Generate",
+    "Shaobkj_Doubao_Image",
     "🤖 Shaobkj -Sora视频", 
     "🤖 Shaobkj -Veo视频",
     "🎬 SD_2.0视频",
     "🎬 Grok视频",
     "🎬 Grok3 Video",
+    "🎬 shaobkj-grok-3视频生成",
+    "🎨 豆包图像生成",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "🤖并发-编辑-图像驱动",
     "Shaobkj_GroupedConcurrentImageEdit",
@@ -52,7 +56,10 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_SD20_Video",
     "Shaobkj_Grok_Video",
     "Shaobkj_Grok3_Video",
+    "Shaobkj_Grok3_Video_Generate",
+    "Shaobkj_Doubao_Image",
     "Shaobkj_ConcurrentImageEdit_Sender",
+
     "Shaobkj_GroupedConcurrentImageEdit",
     "Shaobkj_LLM_App",
     "Shaobkj_LLM_Test_API",
@@ -86,6 +93,8 @@ const THEME_CONFIG = {
     "Shaobkj_GPT2Edits_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_LLM_App": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_LLM_Test_API": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_Doubao_Image": { color: "#7D24A6", bgcolor: "#1E0A29" },
+
     "Shaobkj_Media_Reverse_Prompt": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "🤖图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
@@ -145,7 +154,7 @@ function getThemeForNode(node) {
 function shouldManageDynamicInputsByNodeData(nodeData) {
     const name = nodeData?.name || "";
     const displayName = nodeData?.display_name || nodeData?.displayName || "";
-    if (name === "Shaobkj_Media_Reverse_Prompt" || displayName === "🔍视频/图片-反推") {
+    if (name === "Shaobkj_Media_Reverse_Prompt" || displayName === "🔍视频/图片-反推" || name === "Shaobkj_ParamExtract" || displayName === "🧩 shaobkj-参数提取") {
         return false;
     }
     if (DYNAMIC_NODES.includes(name)) {
@@ -160,10 +169,10 @@ function shouldManageDynamicInputsByNodeData(nodeData) {
 function shouldManageDynamicInputsByNode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
-    if (t === "Shaobkj_ZeroOneFloat" || t === "Shaobkj_Media_Reverse_Prompt") {
+    if (t === "Shaobkj_ZeroOneFloat" || t === "Shaobkj_Media_Reverse_Prompt" || t === "Shaobkj_ParamExtract") {
         return false;
     }
-    if (title && typeof title === "string" && title.includes("视频/图片-反推")) {
+    if (title && typeof title === "string" && (title.includes("视频/图片-反推") || title.includes("参数提取"))) {
         return false;
     }
     if (t && DYNAMIC_NODES.includes(t)) {
@@ -283,7 +292,18 @@ function getDynamicInputSpec(node) {
             legacyNames: ["参考图"],
         };
     }
+    if (t === "Shaobkj_Doubao_Image" || (typeof title === "string" && title.includes("豆包图像生成"))) {
+        return {
+            prefix: "参考图",
+            slotType: "IMAGE",
+            minInputs: 2,
+            maxInputs: 9,
+            legacyPrefixes: ["image_"],
+            legacyNames: ["参考图"],
+        };
+    }
     if (k.includes("video_edit") || k.includes("视频编辑")) {
+
         return { prefix: "video_", slotType: "VIDEO" };
     }
     return { prefix: "image_", slotType: "IMAGE" };
@@ -292,6 +312,9 @@ function getDynamicInputSpec(node) {
 function isShaobkjRuntimeNode(node) {
     const t = node?.type;
     const title = node?.title;
+    if (t === "Shaobkj_ParamExtract" || (typeof title === "string" && title.includes("参数提取"))) {
+        return false;
+    }
     
     // Debug logging
     if (t && (SHAOBKJ_NODE_TYPES.includes(t) || DYNAMIC_NODES.includes(t))) {
@@ -537,7 +560,8 @@ function setupNanoBananaEditingMode(node) {
 function setupGrokVideoDurationMode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
-    if (!(t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok3 Video"))))) {
+    if (!(t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || t === "Shaobkj_Grok3_Video_Generate" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok3 Video") || title.includes("shaobkj-grok-3视频生成"))))) {
+
         return false;
     }
     if (!node.widgets) return false;
@@ -1370,6 +1394,15 @@ function setupLinkWidget(node) {
     }
     const nodeType = node?.type || "";
     const nodeTitle = node?.title || "";
+    if (nodeType === "Shaobkj_ParamExtract" || (typeof nodeTitle === "string" && nodeTitle.includes("参数提取"))) {
+        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
+    }
     if (isShaobkjZeroOneFloatNode(node)) {
         const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
         if (existingIndex >= 0) {

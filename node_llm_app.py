@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import io
 import os
 import json
@@ -51,7 +51,7 @@ class Shaobkj_LLM_App:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("文本内容", "API响应")
     FUNCTION = "run_llm"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def run_llm(self, API密钥, API地址, 模型选择, 使用系统代理, 系统指令, 用户输入, 思考模式, 思考预算, temperature, topP, 输入图像_长边设置=1280, 等待时间=180, seed=0, **kwargs):
         # Implementation of LLM Logic
@@ -198,7 +198,7 @@ class Shaobkj_LLM_Test_API(Shaobkj_LLM_App):
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("文本内容", "API响应")
     FUNCTION = "run_llm"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def run_llm(self, API密钥, API地址, 模型名称, 使用系统代理, 系统指令, 用户输入, 思考模式, 思考预算, temperature, topP, 输入图像_长边设置=1280, 等待时间=180, seed=0, **kwargs):
         return self._execute_llm(API密钥, API地址, 模型名称, 使用系统代理, 系统指令, 用户输入, 思考模式, 思考预算, temperature, topP, 输入图像_长边设置, 等待时间, seed, **kwargs)
@@ -230,7 +230,7 @@ class Shaobkj_Media_Reverse_Prompt:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("反推文本", "API响应")
     FUNCTION = "run"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def _read_video_path(self, path):
         path = os.fspath(path).strip() if path is not None else ""
@@ -526,7 +526,7 @@ class Shaobkj_NanoBanana_Prompt:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("提示词",)
     FUNCTION = "generate_prompt"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def generate_prompt(self, API密钥, API地址, 用户输入, 任务类型, 模型选择, 场景风格, 品牌名称, 使用系统代理, seed, **kwargs):
         # 1. Select System Prompt based on Task Type

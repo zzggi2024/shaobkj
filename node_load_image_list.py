@@ -1,4 +1,4 @@
-import os
+﻿import os
 import torch
 import numpy as np
 from PIL import Image, ImageOps
@@ -24,7 +24,7 @@ class Shaobkj_LoadImageListFromDir:
     RETURN_NAMES = ("图像", "遮罩", "文件名")
     OUTPUT_IS_LIST = (True, True, True)
     FUNCTION = "load_images"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):

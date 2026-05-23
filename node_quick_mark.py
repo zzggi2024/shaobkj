@@ -1,4 +1,4 @@
-import base64
+﻿import base64
 import io
 import os
 
@@ -23,7 +23,7 @@ class Shaobkj_QuickMark:
     RETURN_TYPES = ("IMAGE", "IMAGE", "MASK", "MASK", "MASK", "MASK", "MASK", "MASK", "MASK")
     RETURN_NAMES = ("原图", "合成图", "总mask", "黑mask", "白mask", "红mask", "绿mask", "蓝mask", "灰mask")
     FUNCTION = "main"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     def main(self, brush_data, brush_size, image_base64):
         brush_data = self._normalize_text_input(brush_data)

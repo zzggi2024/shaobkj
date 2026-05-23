@@ -1,4 +1,4 @@
-import re
+﻿import re
 
 from comfy_execution.graph_utils import ExecutionBlocker
 from server import PromptServer
@@ -33,7 +33,7 @@ def _send_text_process_feedback(unique_id, widget_name, value):
 
 
 class Shaobkj_Text_Process:
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
     FUNCTION = "process_text"
     RETURN_TYPES = ("STRING", "INT", "INT")
     RETURN_NAMES = ("文本", "输出列表数", "当前执行编号")
@@ -151,7 +151,7 @@ class Shaobkj_Text_Process:
 
 
 class Shaobkj_InfinitePromptJoin:
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
     FUNCTION = "join_prompts"
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("提示词",)

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 import threading
 import traceback
@@ -835,7 +835,7 @@ class Shaobkj_ConcurrentImageEdit_Sender:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("API响应", "状态")
     FUNCTION = "submit_task"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
     OUTPUT_NODE = True
 
     def submit_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 主体文本, 保存路径, seed, **kwargs):
@@ -1173,7 +1173,7 @@ class Shaobkj_GroupedConcurrentImageEdit:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("API响应", "状态")
     FUNCTION = "submit_grouped_task"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
     OUTPUT_NODE = True
 
     def submit_grouped_task(self, 提示词, API密钥, API地址, 模型选择, 使用系统代理, 分辨率, 图片比例, 接收模式, 出图数量, 保存路径, seed, **kwargs):
@@ -1315,7 +1315,7 @@ class Shaobkj_Load_Image_Path:
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("image", "mask", "filename")
     FUNCTION = "load_image"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     @classmethod
     def VALIDATE_INPUTS(s, image):
@@ -1376,7 +1376,7 @@ class Shaobkj_Load_Batch_Images:
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("图像", "遮罩", "文件名")
     FUNCTION = "load_images"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
 
     def load_images(self, directory, image_load_cap=0, start_index=0, load_always=False, sort_method="数字顺序"):
         folder_path = directory
@@ -1501,7 +1501,7 @@ class Shaobkj_Image_Save:
     RETURN_TYPES = ()
     RETURN_NAMES = ()
     FUNCTION = "save_image"
-    CATEGORY = "🤖shaobkj-APIbox/实用工具"
+    CATEGORY = "🤖shaobkj-APlbox/实用工具"
     OUTPUT_NODE = True
 
     def save_image(self, 图像, 保存路径, 保存格式, 模式, 文件名, dpi, 质量, 自定义尺寸, 宽, 高, 预览):
@@ -1738,7 +1738,7 @@ class Shaobkj_FourWayRepair_HD:
     RETURN_TYPES = ("IMAGE", "LATENT")
     RETURN_NAMES = ("图像", "latent")
     FUNCTION = "repair"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def repair(self, 图像, 模型, VAE, 正面条件, 负面条件, seed, steps, cfg, 采样器, 调度器, 修补带宽百分比, 软边比例, denoise, 启用分块, 分块尺寸, 分块重叠, 噪声遮罩=True, 遮罩=None):
         def build_soft_band_mask(h, w, band_w, soft_ratio, axis, device):
@@ -1905,7 +1905,7 @@ class Shaobkj_Fixed_Seed:
     RETURN_TYPES = ("INT",)
     RETURN_NAMES = ("seed",)
     FUNCTION = "get_seed"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
     def get_seed(self, seed):
         return (int(seed),)

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import requests
 import time
@@ -36,7 +36,8 @@ class Shaobkj_Veo_Video:
             "required": {
                 "API密钥": ("STRING", {"default": api_key_default, "multiline": False, "tooltip": "服务端 API Key；推荐：填写有效 Key"}),
                 "API地址": ("STRING", {"default": "https://yhmx.work", "multiline": False, "tooltip": "API 基础地址；推荐：https://yhmx.work"}),
-                "模型": (["veo_3_1", "veo_3_1-fast"], {"default": "veo_3_1", "tooltip": "视频模型选择；推荐：veo_3_1"}),
+                "模型": (["veo_3_1", "veo_3_1-fast", "自定义"], {"default": "veo_3_1", "tooltip": "视频模型选择；推荐：veo_3_1"}),
+                "自定义模型": ("STRING", {"default": "veo_3_1", "multiline": False, "tooltip": "当“模型”选择“自定义”时填写实际模型 ID；推荐：veo_3_1"}),
                 "使用系统代理": ("BOOLEAN", {"default": True, "tooltip": "是否使用系统代理；推荐：开启"}),
                 "任务类型": (["智能模式", "文生视频", "图生视频"], {"default": "智能模式", "tooltip": "生成模式；推荐：智能模式"}),
                 "提示词": ("STRING", {"multiline": True, "default": "画面动起来", "tooltip": "视频内容描述；推荐：简洁具体"}),
@@ -55,14 +56,21 @@ class Shaobkj_Veo_Video:
     RETURN_TYPES = ("VIDEO", "STRING")
     RETURN_NAMES = ("video", "API响应")
     FUNCTION = "generate_video"
-    CATEGORY = "🤖shaobkj-APIbox"
+    CATEGORY = "🤖shaobkj-APlbox"
 
-    def generate_video(self, API密钥, API地址, 模型, 使用系统代理, 任务类型, 提示词, 生成时长, 分辨率, 长边设置, 等待时间, seed, 参考图=None, **kwargs):
+    def generate_video(self, API密钥, API地址, 模型, 自定义模型, 使用系统代理, 任务类型, 提示词, 生成时长, 分辨率, 长边设置, 等待时间, seed, 参考图=None, **kwargs):
         pbar = ProgressBar(100)
         pbar.update_absolute(0)
 
         if not API密钥:
             raise ValueError("API Key is required.")
+
+        final_model = str(自定义模型).strip() if 模型 == "自定义" else 模型
+        if not final_model:
+            raise ValueError("当“模型”选择“自定义”时，必须填写“自定义模型”。")
+        print(f"[Shaobkj-Veo] 模型选择={模型} | 自定义模型={自定义模型} | 实际模型={final_model}")
+
+
 
         def extract_error(obj):
             code = None
@@ -115,7 +123,7 @@ class Shaobkj_Veo_Video:
             api_url = f"{base_url}/v1/video/generations"
 
         payload_data = {
-            "model": 模型,
+            "model": final_model,
             "group": "default",
             "prompt": 提示词,
             "seconds": str(生成时长),
@@ -125,6 +133,7 @@ class Shaobkj_Veo_Video:
             # ComfyUI 的 seed 是 INT 类型，保持 INT 类型传递给 API
             "seed": seed,
         }
+
 
         files = {}
         final_mode = 任务类型
@@ -190,7 +199,8 @@ class Shaobkj_Veo_Video:
 
         poll_url = f"{api_url}/{task_id}"
         alt_poll_url = f"{root_base}/v1/videos/{task_id}"
-        alt_poll_body = {"model": 模型}
+        alt_poll_body = {"model": final_model}
+
         alt_content_url = f"{root_base}/v1/videos/{task_id}/content"
         timeout_val = 86400 if 等待时间 == 0 else 等待时间
         start_time = time.time()
