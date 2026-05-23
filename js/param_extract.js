@@ -93,16 +93,25 @@ app.registerExtension({
                 widgetType = "COMBO";
             }
 
+            const signature = `${node.id}:${link.target_slot}:${targetLabel}:${widgetType}`;
+            this.properties = this.properties || {};
+            const signatureChanged = this.properties.__shaobkjParamExtractSignature !== signature;
+            if (signatureChanged) {
+                this.properties.__shaobkjParamExtractSignature = signature;
+                delete this.properties.__shaobkjParamExtractLockedValue;
+            }
+
             if (widgetType in ComfyWidgets) {
                 const currentWidget = this.widgets?.[0];
-                const shouldRebuild = !currentWidget || this[LAST_TYPE] !== widgetType || currentWidget.value === undefined;
+                const shouldRebuild = !currentWidget || this[LAST_TYPE] !== widgetType || currentWidget.value === undefined || signatureChanged;
                 if (shouldRebuild && this.widgets) {
                     this.widgets.length = 0;
                 }
                 if (!this.widgets?.length) {
-                    let v;
-                    if (this.widgets_values?.length && this.widgets_values[0] !== undefined) {
-                        v = this.widgets_values[0];
+                    const lockedValue = this.properties.__shaobkjParamExtractLockedValue;
+                    let savedValue;
+                    if (!signatureChanged && this.widgets_values?.length && this.widgets_values[0] !== undefined) {
+                        savedValue = this.widgets_values[0];
                     }
                     let config = [link.type, {}];
                     if (sourceWidget?.config) {
@@ -114,13 +123,21 @@ app.registerExtension({
                         if (widget.options) {
                             widget.options.values = Array.isArray(values) ? [...values] : [];
                         }
-                        const defaultValue = realWidget?.value ?? v ?? sourceWidget?.value ?? values?.[0];
+                        const defaultValue = lockedValue ?? savedValue ?? realWidget?.value ?? sourceWidget?.value ?? values?.[0];
                         if (defaultValue !== undefined) {
                             widget.value = defaultValue;
                         }
-                    } else if (v !== undefined && (!this[LAST_TYPE] || this[LAST_TYPE] === widgetType)) {
-                        widget.value = v;
+                    } else {
+                        const defaultValue = lockedValue ?? savedValue ?? realWidget?.value ?? sourceWidget?.value;
+                        if (defaultValue !== undefined) {
+                            widget.value = defaultValue;
+                        }
                     }
+                    const originalCallback = widget.callback;
+                    widget.callback = (value, ...args) => {
+                        this.properties.__shaobkjParamExtractLockedValue = widget.value ?? value;
+                        return originalCallback?.apply(widget, [value, ...args]);
+                    };
                     this[LAST_TYPE] = widgetType;
                 }
             } else if (this.widgets) {

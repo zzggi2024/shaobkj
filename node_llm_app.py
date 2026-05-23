@@ -4,7 +4,6 @@ import os
 import json
 import re
 import time
-import traceback
 import random
 import torch
 import requests
@@ -21,6 +20,37 @@ from .shaobkj_shared import (
 )
 
 LLM_MODEL_OPTIONS = ["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview", "gpt-5.4-mini"]
+
+
+def _summarize_llm_response(res_json):
+    if not isinstance(res_json, dict):
+        return str(res_json)
+    summary = {}
+    if res_json.get("promptFeedback"):
+        summary["promptFeedback"] = res_json.get("promptFeedback")
+    candidates = res_json.get("candidates") or []
+    if candidates:
+        candidate = candidates[0]
+        for key in ("finishReason", "safetyRatings", "citationMetadata"):
+            if candidate.get(key):
+                summary[key] = candidate.get(key)
+    return json.dumps(summary or res_json, ensure_ascii=False)[:1200]
+
+
+def _extract_required_llm_text(res_json, node_name):
+    generated_text = ""
+    if isinstance(res_json, dict) and res_json.get("candidates"):
+        candidate = res_json["candidates"][0]
+        content = candidate.get("content") or {}
+        for part in content.get("parts") or []:
+            text = part.get("text")
+            if text:
+                generated_text += text
+    generated_text = generated_text.strip()
+    if not generated_text:
+        raise RuntimeError(f"{node_name}未生成有效文本，工作流已中断。API响应：{_summarize_llm_response(res_json)}")
+    return generated_text
+
 
 class Shaobkj_LLM_App:
     def __init__(self):
@@ -139,37 +169,22 @@ class Shaobkj_LLM_App:
 
         headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         
-        try:
-            response = post_json_with_retry(
-                session,
-                url,
-                headers=headers,
-                payload=payload,
-                timeout=submit_timeout,
-                proxies=proxies,
-                verify=False,
-            )
-            
-            if response.status_code != 200:
-                return (f"API Error {response.status_code}: {response.text}", str(response.text))
+        response = post_json_with_retry(
+            session,
+            url,
+            headers=headers,
+            payload=payload,
+            timeout=submit_timeout,
+            proxies=proxies,
+            verify=False,
+        )
+        
+        if response.status_code != 200:
+            raise RuntimeError(f"LLM应用请求失败，工作流已中断。HTTP {response.status_code}: {response.text}")
 
-            res_json = response.json()
-            
-            generated_text = ""
-            if "candidates" in res_json and len(res_json["candidates"]) > 0:
-                candidate = res_json["candidates"][0]
-                if "content" in candidate and "parts" in candidate["content"]:
-                    for part in candidate["content"]["parts"]:
-                        if "text" in part:
-                            generated_text += part["text"]
-            
-            if not generated_text:
-                generated_text = "No text response generated."
-                
-            return (generated_text, json.dumps(res_json, ensure_ascii=False))
-
-        except Exception as e:
-            return (f"Error: {str(e)}", str(traceback.format_exc()))
+        res_json = response.json()
+        generated_text = _extract_required_llm_text(res_json, "LLM应用")
+        return (generated_text, json.dumps(res_json, ensure_ascii=False))
 
 
 class Shaobkj_LLM_Test_API(Shaobkj_LLM_App):
@@ -474,29 +489,20 @@ class Shaobkj_Media_Reverse_Prompt:
         headers = {"Content-Type": "application/json", "x-goog-api-key": API密钥}
         url = f"{base_origin}/v1beta/models/{model}:generateContent"
 
-        try:
-            response = post_json_with_retry(
-                session,
-                url,
-                headers=headers,
-                payload=payload,
-                timeout=submit_timeout,
-                proxies=proxies,
-                verify=False,
-            )
-            if response.status_code != 200:
-                return (f"API Error {response.status_code}: {response.text}", str(response.text))
-            res_json = response.json()
-            generated_text = ""
-            if "candidates" in res_json and len(res_json["candidates"]) > 0:
-                candidate = res_json["candidates"][0]
-                if "content" in candidate and "parts" in candidate["content"]:
-                    for part in candidate["content"]["parts"]:
-                        if "text" in part:
-                            generated_text += part["text"]
-            return ((generated_text or "No text response generated."), json.dumps(res_json, ensure_ascii=False))
-        except Exception as e:
-            return (f"Error: {str(e)}", str(traceback.format_exc()))
+        response = post_json_with_retry(
+            session,
+            url,
+            headers=headers,
+            payload=payload,
+            timeout=submit_timeout,
+            proxies=proxies,
+            verify=False,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"视频/图片反推请求失败，工作流已中断。HTTP {response.status_code}: {response.text}")
+        res_json = response.json()
+        generated_text = _extract_required_llm_text(res_json, "视频/图片反推")
+        return (generated_text, json.dumps(res_json, ensure_ascii=False))
 
 
 class Shaobkj_NanoBanana_Prompt:
@@ -622,7 +628,7 @@ Instructions:
         
         api_key = API密钥
         if not api_key:
-            return ("Error: API Key is required.",)
+            raise ValueError("API Key is required.")
 
         base_origin = str(API地址).rstrip("/")
         if base_origin.endswith("/v1"):
@@ -641,29 +647,21 @@ Instructions:
         disable_insecure_request_warnings()
         session, proxies = create_requests_session(bool(使用系统代理))
         
-        try:
-            response = post_json_with_retry(
-                session, url, headers=headers, payload=payload, timeout=60, proxies=proxies, verify=False
-            )
-            if response.status_code != 200:
-                return (f"Error: {response.text}",)
-            
-            res_json = response.json()
-            generated_text = ""
-            if "candidates" in res_json and len(res_json["candidates"]) > 0:
-                candidate = res_json["candidates"][0]
-                if "content" in candidate and "parts" in candidate["content"]:
-                    for part in candidate["content"]["parts"]:
-                        if "text" in part:
-                            generated_text += part["text"]
-            
-            # Post-processing: Replace [BRAND] placeholder if needed (though LLM should have handled it)
-            if 品牌名称 and "[BRAND]" in generated_text:
-                generated_text = generated_text.replace("[BRAND]", 品牌名称)
-            if is_editing_mode:
-                generated_text = ensure_two_quality_boosters(generated_text)
-                
-            return (generated_text.strip(),)
-            
-        except Exception as e:
-            return (f"Error: {str(e)}",)
+        response = post_json_with_retry(
+            session, url, headers=headers, payload=payload, timeout=60, proxies=proxies, verify=False
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"香蕉专属提示词请求失败，工作流已中断。HTTP {response.status_code}: {response.text}")
+        
+        res_json = response.json()
+        generated_text = _extract_required_llm_text(res_json, "香蕉专属提示词")
+        
+        # Post-processing: Replace [BRAND] placeholder if needed (though LLM should have handled it)
+        if 品牌名称 and "[BRAND]" in generated_text:
+            generated_text = generated_text.replace("[BRAND]", 品牌名称)
+        if is_editing_mode:
+            generated_text = ensure_two_quality_boosters(generated_text)
+        generated_text = generated_text.strip()
+        if not generated_text:
+            raise RuntimeError("香蕉专属提示词未生成有效提示词，工作流已中断。")
+        return (generated_text,)
