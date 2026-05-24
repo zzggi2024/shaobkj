@@ -622,10 +622,59 @@ function setupImageSaveCustomSizeMode(node) {
     const widthWidget = findWidgetByNames(node, ["宽"]);
     const heightWidget = findWidgetByNames(node, ["高"]);
     if (!enableWidget || !widthWidget || !heightWidget) return false;
+    if (!enableWidget.__shaobkjImageSaveCustomSizeWrapped) {
+        const originalCallback = enableWidget.callback;
+        enableWidget.callback = function () {
+            const result = typeof originalCallback === "function" ? originalCallback.apply(this, arguments) : undefined;
+            setupImageSaveCustomSizeMode(node);
+            return result;
+        };
+        enableWidget.__shaobkjImageSaveCustomSizeWrapped = true;
+    }
+
     const enabled = Boolean(enableWidget.value);
+    node.__shaobkjImageSaveCustomSizeEnabled = enabled;
+
+    const setupDimensionWidget = (widget) => {
+        let changed = false;
+        if (!widget.__shaobkjImageSaveSizeWrapped) {
+            const originalCallback = widget.callback;
+            widget.callback = function () {
+                if (node.__shaobkjImageSaveCustomSizeEnabled === false) {
+                    if (widget.__shaobkjImageSaveLockedValue !== undefined) {
+                        widget.value = widget.__shaobkjImageSaveLockedValue;
+                    }
+                    return undefined;
+                }
+                const result = typeof originalCallback === "function" ? originalCallback.apply(this, arguments) : undefined;
+                widget.__shaobkjImageSaveLockedValue = widget.value;
+                return result;
+            };
+            widget.__shaobkjImageSaveSizeWrapped = true;
+            changed = true;
+        }
+        if (enabled) {
+            widget.__shaobkjImageSaveLockedValue = widget.value;
+        } else {
+            if (widget.__shaobkjImageSaveLockedValue === undefined) {
+                widget.__shaobkjImageSaveLockedValue = widget.value;
+            }
+            if (widget.value !== widget.__shaobkjImageSaveLockedValue) {
+                widget.value = widget.__shaobkjImageSaveLockedValue;
+                changed = true;
+            }
+        }
+        changed = setWidgetDisabledState(widget, !enabled) || changed;
+        if (widget.readonly !== !enabled) {
+            widget.readonly = !enabled;
+            changed = true;
+        }
+        return changed;
+    };
+
     let changed = false;
-    changed = setWidgetDisabledState(widthWidget, !enabled) || changed;
-    changed = setWidgetDisabledState(heightWidget, !enabled) || changed;
+    changed = setupDimensionWidget(widthWidget) || changed;
+    changed = setupDimensionWidget(heightWidget) || changed;
     if (changed) {
         node.setDirtyCanvas(true, true);
     }
@@ -1958,6 +2007,7 @@ app.registerExtension({
                     setupLoadBatchImagesLocalization(node);
                     setupNanoBananaEditingMode(node);
                     setupGrokVideoDurationMode(node);
+                    setupImageSaveCustomSizeMode(node);
                     setupTextProcessListMode(node);
                     if (isShaobkjTextProcessNode(node)) {
                         const currentSourceText = getTextProcessSourceText(node);

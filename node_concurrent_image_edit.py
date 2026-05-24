@@ -1491,7 +1491,7 @@ class Shaobkj_Image_Save:
                 "文件名": ("STRING", {"default": "image", "multiline": False, "tooltip": "保存文件名(不含扩展名)；推荐：image"}),
                 "dpi": ("INT", {"default": 300, "min": 1, "max": 2400, "step": 1, "tooltip": "输出图像DPI；推荐：300"}),
                 "质量": ("INT", {"default": 100, "min": 1, "max": 100, "step": 1, "tooltip": "JPG 质量(1-100)；推荐：100"}),
-                "自定义尺寸": ("BOOLEAN", {"default": False, "label_on": "是", "label_off": "否", "tooltip": "是否启用中心裁切到指定宽高"}),
+                "自定义尺寸": ("BOOLEAN", {"default": False, "label_on": "是", "label_off": "否", "tooltip": "是否启用按比例缩放并中心裁切到指定宽高"}),
                 "宽": ("INT", {"default": 1024, "min": 1, "max": 200000, "step": 1, "tooltip": "自定义输出宽度"}),
                 "高": ("INT", {"default": 1024, "min": 1, "max": 200000, "step": 1, "tooltip": "自定义输出高度"}),
                 "预览": ("BOOLEAN", {"default": True, "label_on": "开启", "label_off": "关闭", "tooltip": "是否在界面显示预览；推荐：开启"}),
@@ -1593,19 +1593,22 @@ class Shaobkj_Image_Save:
                 target_w = max(1, int(宽))
                 target_h = max(1, int(高))
                 h_src, w_src = int(arr.shape[0]), int(arr.shape[1])
-                crop_w = min(target_w, w_src)
-                crop_h = min(target_h, h_src)
-                if (crop_w != target_w or crop_h != target_h) and not crop_warning_sent:
-                    PromptServer.instance.send_sync(
-                        "shaobkj.image_save.warning",
-                        {
-                            "message": f"⚠️ 自定义尺寸({target_w}x{target_h})超过原图尺寸，已按中心裁切到可用尺寸({crop_w}x{crop_h})。"
-                        },
-                    )
-                    crop_warning_sent = True
-                x0 = max(0, (w_src - crop_w) // 2)
-                y0 = max(0, (h_src - crop_h) // 2)
-                arr = arr[y0:y0 + crop_h, x0:x0 + crop_w, :]
+                scale = max(target_w / w_src, target_h / h_src)
+                resized_w = max(target_w, int(round(w_src * scale)))
+                resized_h = max(target_h, int(round(h_src * scale)))
+                channels = int(arr.shape[-1])
+                if channels >= 4:
+                    resize_img = Image.fromarray((arr[:, :, :4] * 255.0).astype(np.uint8), mode="RGBA")
+                else:
+                    resize_img = Image.fromarray((arr[:, :, :3] * 255.0).astype(np.uint8), mode="RGB")
+                resize_img = resize_img.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
+                x0 = max(0, (resized_w - target_w) // 2)
+                y0 = max(0, (resized_h - target_h) // 2)
+                resize_img = resize_img.crop((x0, y0, x0 + target_w, y0 + target_h))
+                arr = np.array(resize_img).astype(np.float32) / 255.0
+                if arr.ndim == 2:
+                    arr = arr[:, :, None]
+
             if extension == "png":
                 if arr.shape[-1] >= 4:
                     img_arr = (arr[:, :, :4] * 255.0).astype(np.uint8)
