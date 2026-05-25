@@ -111,13 +111,12 @@ class Shaobkj_SD20_Video:
         blank_tensor = pil_to_tensor(Image.new("RGB", (1, 1), color="black"))
 
         base_url = str(API地址).rstrip("/")
-        if base_url.endswith("/v1"):
-            base_url = base_url[:-3]
-        api_origin = urlparse(base_url).netloc
-        submit_url = f"{base_url}/seedance/v3/contents/generations/tasks"
+        root_base = base_url[:-3] if base_url.endswith("/v1") else base_url
+        submit_url = f"{base_url}/video/generations" if base_url.endswith("/v1") else f"{base_url}/v1/video/generations"
+        api_origin = urlparse(root_base).netloc
         headers = {
-            "Content-Type": "application/json",
             "Authorization": f"Bearer {API密钥}",
+            "Content-Type": "application/json",
         }
 
         disable_insecure_request_warnings()
@@ -130,27 +129,15 @@ class Shaobkj_SD20_Video:
             content = [{"type": "text", "text": str(提示词)}]
             frame_count = 0
 
-            first_frame_added = self._append_image_content(
-                content,
-                首帧,
-                int(长边设置),
-                role="first_frame",
-            )
+            first_frame_added = self._append_image_content(content, 首帧, int(长边设置), role="first_frame")
             if not first_frame_added:
                 first_frame_added = self._append_asset_content(content, asset_first_frame, "image_url", "first_frame")
             if first_frame_added:
                 frame_count += 1
 
             last_frame_added = False
-            if 末帧 is not None and first_frame_added:
-                last_frame_added = self._append_image_content(
-                    content,
-                    末帧,
-                    int(长边设置),
-                    role="last_frame",
-                )
-            elif 末帧 is not None:
-                print("[Shaobkj-SD2.0] 检测到末帧，但未提供首帧，已忽略末帧输入。")
+            if 末帧 is not None:
+                last_frame_added = self._append_image_content(content, 末帧, int(长边设置), role="last_frame")
             elif first_frame_added:
                 last_frame_added = self._append_asset_content(content, asset_last_frame, "image_url", "last_frame")
             if last_frame_added:
@@ -180,15 +167,9 @@ class Shaobkj_SD20_Video:
             reference_videos = reference_videos[:3]
             ref_video_count = 0
             for video_input in reference_videos:
-                video_url = self._upload_video_get_url(session, base_url, API密钥, video_input, proxies=proxies)
+                video_url = self._upload_video_get_url(session, root_base, API密钥, video_input, proxies=proxies)
                 if video_url:
-                    content.append(
-                        {
-                            "type": "video_url",
-                            "video_url": {"url": video_url},
-                            "role": "reference_video",
-                        }
-                    )
+                    content.append({"type": "video_url", "video_url": {"url": video_url}, "role": "reference_video"})
                     ref_video_count += 1
             for asset_ref in self._split_asset_refs(asset_ref_videos):
                 if self._append_asset_content(content, asset_ref, "video_url", "reference_video"):
@@ -201,15 +182,9 @@ class Shaobkj_SD20_Video:
             reference_audios = reference_audios[:3]
             ref_audio_count = 0
             for audio_input in reference_audios:
-                audio_url = self._upload_audio_get_url(session, base_url, API密钥, audio_input, proxies=proxies)
+                audio_url = self._upload_audio_get_url(session, root_base, API密钥, audio_input, proxies=proxies)
                 if audio_url:
-                    content.append(
-                        {
-                            "type": "audio_url",
-                            "audio_url": {"url": audio_url},
-                            "role": "reference_audio",
-                        }
-                    )
+                    content.append({"type": "audio_url", "audio_url": {"url": audio_url}, "role": "reference_audio"})
                     ref_audio_count += 1
             for asset_ref in self._split_asset_refs(asset_ref_audios):
                 if self._append_asset_content(content, asset_ref, "audio_url", "reference_audio"):
@@ -217,20 +192,25 @@ class Shaobkj_SD20_Video:
 
             pbar.update_absolute(35)
 
-            payload = {
-                "model": str(模型).strip(),
+            metadata = {
                 "content": content,
                 "duration": int(生成时长),
-                "ratio": str(画幅比例).strip(),
                 "resolution": str(分辨率).strip(),
+                "ratio": str(画幅比例).strip(),
                 "generate_audio": bool(生成音频),
-                "return_last_frame": bool(返回末帧),
-                "watermark": bool(水印),
             }
             if 联网搜索:
-                payload["tools"] = [{"type": "web_search"}]
+                metadata["tools"] = [{"type": "web_search"}]
+
+            payload = {
+                "model": str(模型).strip(),
+                "prompt": str(提示词),
+                "metadata": metadata,
+            }
             if int(seed) >= 0:
                 payload["seed"] = int(seed)
+            if bool(水印):
+                payload["watermark"] = True
 
             print(
                 f"[Shaobkj-SD2.0] 提交任务 model={模型}, duration={生成时长}s, ratio={画幅比例}, "
@@ -258,7 +238,7 @@ class Shaobkj_SD20_Video:
             raise RuntimeError(f"API Error {resp.status_code}: {self._stringify_payload(err_msg)}")
 
         submit_payload = self._response_payload(resp)
-        task_id = str(submit_payload.get("id") or submit_payload.get("task_id") or "").strip()
+        task_id = self._extract_task_id(resp, submit_payload)
         direct_video_url, direct_last_frame_url = self._extract_media_urls(submit_payload)
         submit_status = self._normalize_status(submit_payload.get("status") or submit_payload.get("state"))
 
@@ -291,10 +271,15 @@ class Shaobkj_SD20_Video:
             )
 
         if not task_id:
+            raw_payload = str(submit_payload.get("raw") or "").lstrip().lower()
+            if raw_payload.startswith(("<!doctype", "<html")):
+                raise RuntimeError("API地址未命中视频生成接口，请检查 API地址 是否正确。")
             print(f"[Shaobkj-SD2.0] 未找到任务ID详情: {self._stringify_payload(submit_payload)}")
             raise RuntimeError("未找到任务ID (id/task_id)")
 
-        status_url = f"{base_url}/seedance/v3/contents/generations/tasks/{task_id}"
+        poll_url = f"{submit_url}/{task_id}"
+        alt_poll_url = f"{root_base}/v1/videos/{task_id}"
+        alt_content_url = f"{root_base}/v1/videos/{task_id}/content"
         timeout_val = 86400 if int(等待时间) == 0 else int(等待时间)
         start_time = time.time()
         poll_interval = 5
@@ -312,13 +297,24 @@ class Shaobkj_SD20_Video:
 
             try:
                 poll_resp = session.get(
-                    status_url,
-                    headers={"Authorization": f"Bearer {API密钥}"},
+                    poll_url,
+                    headers=headers,
                     params={"_t": int(time.time() * 1000)},
                     verify=False,
                     timeout=poll_timeout,
                     proxies=proxies,
                 )
+                if poll_resp.status_code in (404, 405):
+                    alt_resp = session.get(
+                        alt_poll_url,
+                        headers=headers,
+                        json={"model": str(模型).strip()},
+                        verify=False,
+                        timeout=poll_timeout,
+                        proxies=proxies,
+                    )
+                    if alt_resp.status_code == 200:
+                        poll_resp = alt_resp
             except Exception as e:
                 fail_count += 1
                 print(f"[Shaobkj-SD2.0] 轮询失败第 {fail_count} 次: {e}")
@@ -343,9 +339,11 @@ class Shaobkj_SD20_Video:
                     raise RuntimeError(f"任务失败，{error_message}")
                 raise RuntimeError("任务失败")
 
-            if status in {"SUCCEEDED", "SUCCESS", "COMPLETED", "DONE", "FINISHED"} and video_url:
+            if status in {"SUCCEEDED", "SUCCESS", "COMPLETED", "DONE", "FINISHED"} or (progress_val is not None and progress_val >= 99.0):
                 pbar.update_absolute(92)
                 dl_budget = None if int(等待时间) == 0 else max(1, int(timeout_val - (time.time() - start_time)))
+                if not video_url:
+                    video_url = alt_content_url
                 video_obj = self._download_video(
                     video_url,
                     session=session,
@@ -647,6 +645,29 @@ class Shaobkj_SD20_Video:
         elif isinstance(value, list):
             for item in value:
                 yield from cls._walk(item)
+
+    @classmethod
+    def _extract_task_id(cls, response, payload):
+        for item in cls._walk(payload):
+            if not isinstance(item, dict):
+                continue
+            for key in ("id", "task_id", "taskId", "taskID"):
+                value = item.get(key)
+                if value:
+                    return str(value).strip()
+
+        headers = getattr(response, "headers", {}) or {}
+        task_id = headers.get("X-Task-Id") or headers.get("Task-Id") or headers.get("task_id") or headers.get("task-id")
+        if task_id:
+            return str(task_id).strip()
+
+        location = headers.get("Location") or headers.get("location")
+        if isinstance(location, str) and location.strip():
+            match = re.search(r"/([^/]+)/?$", location.strip())
+            if match:
+                return match.group(1).strip()
+
+        return ""
 
     @classmethod
     def _find_status(cls, payload):
