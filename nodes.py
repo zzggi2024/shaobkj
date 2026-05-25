@@ -20,6 +20,7 @@ from .node_zero_one_float import Shaobkj_ZeroOneFloat
 from .node_custom_video_save import Shaobkj_CustomVideoSave
 from .node_doubao_image import Shaobkj_Doubao_Image
 from .node_param_extract import Shaobkj_ParamExtract
+from .node_size_preset import Shaobkj_SizePreset
 
 NODE_CLASS_MAPPINGS = {
 
@@ -63,10 +64,12 @@ NODE_CLASS_MAPPINGS = {
     "Shaobkj_CustomVideoSave": Shaobkj_CustomVideoSave,
     "Shaobkj_Doubao_Image": Shaobkj_Doubao_Image,
     "Shaobkj_ParamExtract": Shaobkj_ParamExtract,
+    "Shaobkj_SizePreset": Shaobkj_SizePreset,
 }
 
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+
     "Shaobkj_APINode": "🤖图像生成",
     "Shaobkj_TestAPINode": "🧪测试API",
     "Shaobkj_APINode_Batch": "🤖并发-编辑-文本驱动",
@@ -107,7 +110,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Shaobkj_CustomVideoSave": "🎬 视频保存-少白科技",
     "Shaobkj_Doubao_Image": "🎨 豆包图像生成",
     "Shaobkj_ParamExtract": "🧩 shaobkj-参数提取",
+    "Shaobkj_SizePreset": "📐 shaobkj-尺寸预设",
 }
+
 
 
 print("[ComfyUI-shaobkj] Node code loaded. Please restart ComfyUI if you see this message for the first time.")

@@ -201,7 +201,14 @@ function isShaobkjZeroOneFloatNode(node) {
     return t === "Shaobkj_ZeroOneFloat";
 }
 
+function isShaobkjSizePresetNode(node) {
+    const t = node?.type || "";
+    const title = node?.title || "";
+    return t === "Shaobkj_SizePreset" || (typeof title === "string" && title.includes("尺寸预设"));
+}
+
 function getImageSplitCount(node) {
+
     const cols = Number(findWidgetByNames(node, ["水平张数"])?.value ?? 3);
     const rows = Number(findWidgetByNames(node, ["垂直张数"])?.value ?? 3);
     return Math.min(64, Math.max(1, Math.trunc(cols) || 1) * Math.max(1, Math.trunc(rows) || 1));
@@ -1443,7 +1450,17 @@ function setupLinkWidget(node) {
     }
     const nodeType = node?.type || "";
     const nodeTitle = node?.title || "";
+    if (isShaobkjSizePresetNode(node)) {
+        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
+    }
     if (nodeType === "Shaobkj_ParamExtract" || (typeof nodeTitle === "string" && nodeTitle.includes("参数提取"))) {
+
         const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
