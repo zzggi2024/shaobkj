@@ -212,6 +212,7 @@ def _register_auth_routes():
     routes = _PromptServer.instance.routes
     @routes.get(_AUTH_ROUTE_PREFIX + "/status")
     async def _shaobkj_release_auth_status(request):
+        _set_configured_instance_id(request.query.get("instance_id") or "")
         ok = _is_authorized()
         return _web.json_response({"ok": ok, "message": "" if ok else "授权码停用或失效，请重新输入"})
     @routes.post(_AUTH_ROUTE_PREFIX + "/verify")

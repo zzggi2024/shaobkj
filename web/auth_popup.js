@@ -20,7 +20,9 @@ function setStoredAccessKey(value) {
 }
 
 async function checkStatus() {
-    const response = await api.fetchApi(`${AUTH_API}/status`);
+    const instanceId = getCloudInstanceIdFromRuntime();
+    const statusUrl = instanceId ? `${AUTH_API}/status?instance_id=${encodeURIComponent(instanceId)}` : `${AUTH_API}/status`;
+    const response = await api.fetchApi(statusUrl);
     const data = await response.json();
     authorized = !!data?.ok;
     if (!authorized && data?.message) {
