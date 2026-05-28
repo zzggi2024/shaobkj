@@ -30,11 +30,34 @@ async function checkStatus() {
     return authorized;
 }
 
+function normalizeCloudInstanceId(value) {
+    return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9_.:-]/g, "").slice(0, 128);
+}
+
+function getCloudInstanceIdFromUrl(url) {
+    const rawUrl = String(url || "").trim();
+    if (!rawUrl) return "";
+    let parsedUrl;
+    try {
+        parsedUrl = new URL(rawUrl, window.location?.href || undefined);
+    } catch (_error) {
+        return "";
+    }
+    const dashboardMatch = parsedUrl.pathname.match(/\/dashboard\/sd\/([^/?#]+)/i);
+    if (dashboardMatch?.[1]) return normalizeCloudInstanceId(dashboardMatch[1]);
+    return "";
+}
+
+function getCloudInstanceIdFromRuntime() {
+    return getCloudInstanceIdFromUrl(window.location?.href) || getCloudInstanceIdFromUrl(document.referrer);
+}
+
 async function verifyAccessKey(accessKey) {
+    const instanceId = getCloudInstanceIdFromRuntime();
     const response = await api.fetchApi(`${AUTH_API}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: accessKey }),
+        body: JSON.stringify({ code: accessKey, instance_id: instanceId }),
     });
     const data = await response.json();
     if (!response.ok || !data?.ok) {

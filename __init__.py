@@ -190,6 +190,19 @@ def _save_auth(access_key):
         return False
     _AUTH_FILE.write_text(_json.dumps({"ok": True, "auth_scope": _AUTH_SCOPE, "access_key": access_key.strip(), "device": _device_payload()}, ensure_ascii=False), encoding="utf-8")
     return True
+def _set_configured_instance_id(instance_id):
+    normalized = _normalize_instance_id(instance_id)
+    if not normalized:
+        return
+    try:
+        payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8")) if _DEVICE_FILE.is_file() else {}
+    except Exception:
+        payload = {}
+    payload["instance_id"] = normalized
+    payload.pop("device_id", None)
+    payload.pop("device_fingerprint", None)
+    payload.pop("device_anchor_source", None)
+    _write_device_config(payload)
 def _register_auth_routes():
     try:
         from aiohttp import web as _web
@@ -207,6 +220,7 @@ def _register_auth_routes():
             payload = await request.json()
         except Exception:
             payload = {}
+        _set_configured_instance_id(payload.get("instance_id") or "")
         if _save_auth(payload.get("code") or ""):
             return _web.json_response({"ok": True, "message": "授权成功"})
         return _web.json_response({"ok": False, "message": "授权码错误"}, status=400)
