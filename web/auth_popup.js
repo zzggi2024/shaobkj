@@ -19,21 +19,26 @@ function setStoredAccessKey(value) {
     else localStorage.removeItem(STORAGE_KEY);
 }
 
-async function checkStatus() {
-    const instanceId = getCloudInstanceIdFromRuntime();
-    const statusUrl = instanceId ? `${AUTH_API}/status?instance_id=${encodeURIComponent(instanceId)}` : `${AUTH_API}/status`;
-    const response = await api.fetchApi(statusUrl);
+async function requestJson(url, options) {
+    const response = await api.fetchApi(url, options);
     const data = await response.json();
-    authorized = !!data?.ok;
-    if (!authorized && data?.message) {
-        setStoredAccessKey("");
-        showAuthDialog(data.message);
-    }
-    return authorized;
+    if (!response.ok) throw new Error(data?.message || "请求失败");
+    return data;
 }
 
 function normalizeCloudInstanceId(value) {
     return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9_.:-]/g, "").slice(0, 128);
+}
+
+function isUsefulCloudInstanceCandidate(value) {
+    const normalized = normalizeCloudInstanceId(value);
+    if (normalized.length < 8 || /^\d+$/.test(normalized)) return false;
+    const ignored = new Set(["dashboard", "sdwebui", "comfyui", "instance", "container", "console", "onethingai", "onethingbusiness", "localhost"]);
+    return !ignored.has(normalized.toLowerCase());
+}
+
+function pickCloudInstanceCandidate(candidates) {
+    return candidates.map((candidate) => normalizeCloudInstanceId(candidate)).filter(isUsefulCloudInstanceCandidate).sort((left, right) => right.length - left.length)[0] || "";
 }
 
 function getCloudInstanceIdFromUrl(url) {
@@ -47,19 +52,87 @@ function getCloudInstanceIdFromUrl(url) {
     }
     const dashboardMatch = parsedUrl.pathname.match(/\/dashboard\/sd\/([^/?#]+)/i);
     if (dashboardMatch?.[1]) return normalizeCloudInstanceId(dashboardMatch[1]);
-    return "";
+    const host = parsedUrl.hostname.trim().toLowerCase();
+    const firstLabel = host.split(".")[0] || "";
+    if (host.includes(".instance.")) {
+        const suffixes = ["-sdwebui", "-comfyui", "-webui"];
+        const suffix = suffixes.find((item) => firstLabel.endsWith(item));
+        return normalizeCloudInstanceId(suffix ? firstLabel.slice(0, -suffix.length) : firstLabel);
+    }
+    if (host.includes(".container.")) {
+        const containerMatch = firstLabel.match(/^(.+)-\d+$/);
+        return normalizeCloudInstanceId(containerMatch?.[1] || firstLabel);
+    }
+    const candidates = [];
+    for (const part of [...parsedUrl.pathname.split("/").filter(Boolean), ...host.split(".").filter(Boolean)]) {
+        candidates.push(part);
+        candidates.push(...part.split(/[-_]/));
+    }
+    return pickCloudInstanceCandidate(candidates);
 }
 
 function getCloudInstanceIdFromRuntime() {
     return getCloudInstanceIdFromUrl(window.location?.href) || getCloudInstanceIdFromUrl(document.referrer);
 }
 
+async function getLocalDeviceInfo() {
+    try {
+        const payload = await requestJson(`${AUTH_API}/device-id`);
+        return {
+            device_id: String(payload?.device_id || ""),
+            device_code: String(payload?.device_code || ""),
+            device_type: String(payload?.device_type || "local"),
+            instance_id: String(payload?.instance_id || ""),
+            cloud_runtime: Boolean(payload?.cloud_runtime),
+        };
+    } catch (_error) {
+        return { device_id: "", device_code: "", device_type: "local", instance_id: "", cloud_runtime: false };
+    }
+}
+
+async function saveCloudInstanceId(instanceId) {
+    const payload = await requestJson(`${AUTH_API}/device-instance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instance_id: instanceId }),
+    });
+    return {
+        device_id: String(payload?.device_id || ""),
+        device_code: String(payload?.device_code || ""),
+        device_type: String(payload?.device_type || "cloud"),
+        instance_id: String(payload?.instance_id || instanceId),
+        cloud_runtime: Boolean(payload?.cloud_runtime ?? true),
+    };
+}
+
+async function ensureCloudInstanceId(deviceInfo) {
+    if (!deviceInfo?.cloud_runtime) return deviceInfo;
+    const detectedInstanceId = getCloudInstanceIdFromRuntime();
+    if (!detectedInstanceId) throw new Error("无法自动识别云端实例 ID，请确认当前 ComfyUI 访问地址包含云平台实例标识。");
+    return saveCloudInstanceId(detectedInstanceId);
+}
+
+async function currentDeviceInfo() {
+    return ensureCloudInstanceId(await getLocalDeviceInfo());
+}
+
+async function checkStatus() {
+    await currentDeviceInfo();
+    const data = await requestJson(`${AUTH_API}/status`);
+    authorized = !!data?.ok;
+    if (!authorized && data?.message) {
+        setStoredAccessKey("");
+        showAuthDialog(data.message);
+    }
+    return authorized;
+}
+
 async function verifyAccessKey(accessKey) {
-    const instanceId = getCloudInstanceIdFromRuntime();
+    const deviceInfo = await currentDeviceInfo();
     const response = await api.fetchApi(`${AUTH_API}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: accessKey, instance_id: instanceId }),
+        body: JSON.stringify({ code: accessKey, ...deviceInfo }),
     });
     const data = await response.json();
     if (!response.ok || !data?.ok) {

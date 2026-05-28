@@ -82,6 +82,24 @@ def _read_text_file(path):
         return path.read_text(encoding="utf-8", errors="ignore").strip()
     except Exception:
         return ""
+def _is_cloud_runtime():
+    if _configured_instance_id():
+        return True
+    cloud_env_keys = (
+        "KUBERNETES_SERVICE_HOST",
+        "CLOUD_RUN_JOB",
+        "AWS_EXECUTION_ENV",
+        "ECS_CONTAINER_METADATA_URI",
+        "ECS_CONTAINER_METADATA_URI_V4",
+        "TENCENTCLOUD_RUNENV",
+        "XIANGONGYUN_INSTANCE_ID",
+    )
+    if any(_os.getenv(key) for key in cloud_env_keys):
+        return True
+    if _P("/.dockerenv").exists() or _P("/run/.containerenv").exists():
+        return True
+    cgroup = _read_text_file(_P("/proc/self/cgroup")).lower()
+    return any(marker in cgroup for marker in ("docker", "kubepods", "containerd", "lxc"))
 def _clean_anchor_value(value):
     value = (value or "").strip().strip("\x00")
     lowered = value.lower()
@@ -133,31 +151,44 @@ def _local_device_id(fingerprint):
     if fingerprint:
         return f"RELEASE-{_SAFE_PLUGIN_NAME}-{fingerprint.upper()}"
     return f"RELEASE-{_SAFE_PLUGIN_NAME}-LOCAL"
+def _device_response_payload(device_identity):
+    device_id = device_identity.get("device_id") or ""
+    return {
+        "device_id": device_id,
+        "device_code": ((device_identity.get("instance_id") or device_id[-12:]) or "").upper(),
+        "device_anchor_source": device_identity.get("device_anchor_source") or "none",
+        "device_type": device_identity.get("device_type") or "local",
+        "instance_id": device_identity.get("instance_id") or "",
+        "cloud_runtime": bool(device_identity.get("cloud_runtime")),
+    }
 def _device_payload():
     current_anchor, anchor_source = _current_device_anchor()
     current_fingerprint = _device_fingerprint(current_anchor) if current_anchor else ""
     instance_id = _configured_instance_id()
     if instance_id:
-        payload = {"device_id": _cloud_device_id(instance_id), "device_type": "cloud", "instance_id": instance_id, "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source}
+        payload = {"device_id": _cloud_device_id(instance_id), "device_type": "cloud", "instance_id": instance_id, "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": True}
         _write_device_config(payload)
-        return {"device_id": payload["device_id"], "device_type": "cloud", "instance_id": instance_id}
+        return _device_response_payload(payload)
     try:
         payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8")) if _DEVICE_FILE.is_file() else {}
         device_id = str(payload.get("device_id") or "").strip()
         saved_fingerprint = str(payload.get("device_fingerprint") or "").strip()
         if device_id and not current_fingerprint:
-            return {"device_id": device_id, "device_type": "local", "instance_id": ""}
+            payload.update({"device_id": device_id, "device_type": "local", "instance_id": "", "cloud_runtime": _is_cloud_runtime()})
+            return _device_response_payload(payload)
         if device_id and not saved_fingerprint:
-            payload.update({"device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source})
+            payload.update({"device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()})
             _write_device_config(payload)
-            return {"device_id": device_id, "device_type": "local", "instance_id": ""}
+            return _device_response_payload(payload)
         if device_id and saved_fingerprint == current_fingerprint:
-            return {"device_id": device_id, "device_type": "local", "instance_id": ""}
+            payload.update({"device_type": "local", "instance_id": "", "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()})
+            return _device_response_payload(payload)
     except Exception:
         pass
     device_id = _local_device_id(current_fingerprint)
-    _write_device_config({"device_id": device_id, "device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source})
-    return {"device_id": device_id, "device_type": "local", "instance_id": ""}
+    payload = {"device_id": device_id, "device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()}
+    _write_device_config(payload)
+    return _device_response_payload(payload)
 def _remote_validate(access_key):
     access_key = (access_key or "").strip()
     if not access_key: return False
@@ -193,7 +224,7 @@ def _save_auth(access_key):
 def _set_configured_instance_id(instance_id):
     normalized = _normalize_instance_id(instance_id)
     if not normalized:
-        return
+        return _device_payload()
     try:
         payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8")) if _DEVICE_FILE.is_file() else {}
     except Exception:
@@ -203,6 +234,7 @@ def _set_configured_instance_id(instance_id):
     payload.pop("device_fingerprint", None)
     payload.pop("device_anchor_source", None)
     _write_device_config(payload)
+    return _device_payload()
 def _register_auth_routes():
     try:
         from aiohttp import web as _web
@@ -210,9 +242,20 @@ def _register_auth_routes():
     except Exception:
         return
     routes = _PromptServer.instance.routes
+    @routes.get(_AUTH_ROUTE_PREFIX + "/device-id")
+    async def _shaobkj_release_device_id(request):
+        _ = request
+        return _web.json_response(_device_payload())
+    @routes.post(_AUTH_ROUTE_PREFIX + "/device-instance")
+    async def _shaobkj_release_device_instance(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        return _web.json_response(_set_configured_instance_id(payload.get("instance_id") or ""))
     @routes.get(_AUTH_ROUTE_PREFIX + "/status")
     async def _shaobkj_release_auth_status(request):
-        _set_configured_instance_id(request.query.get("instance_id") or "")
+        _ = request
         ok = _is_authorized()
         return _web.json_response({"ok": ok, "message": "" if ok else "授权码停用或失效，请重新输入"})
     @routes.post(_AUTH_ROUTE_PREFIX + "/verify")
