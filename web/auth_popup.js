@@ -23,6 +23,10 @@ async function checkStatus() {
     const response = await api.fetchApi(`${AUTH_API}/status`);
     const data = await response.json();
     authorized = !!data?.ok;
+    if (!authorized && data?.message) {
+        setStoredAccessKey("");
+        showAuthDialog(data.message);
+    }
     return authorized;
 }
 
@@ -132,13 +136,16 @@ function showAuthDialog(initialMessage = "") {
 app.registerExtension({
     name: `shaobkj.release_auth.${SAFE_PLUGIN_NAME}`,
     async setup() {
-        setTimeout(async () => {
+        const runCheck = async () => {
             try {
                 const ok = await checkStatus();
                 if (!ok) showAuthDialog();
             } catch (_error) {
-                showAuthDialog();
+                authorized = false;
+                showAuthDialog("授权状态检查失败，请重新输入");
             }
-        }, 500);
+        };
+        setTimeout(runCheck, 500);
+        setInterval(runCheck, 5000);
     },
 });

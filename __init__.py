@@ -17,7 +17,9 @@ _PLUGIN_NAME = 'shaobkj'
 _SAFE_PLUGIN_NAME = 'shaobkj'
 _AUTH_SCOPE = 'ACCOUNT:f5ab687684789fee24b634c1dd2fee7a8bad75516d71477a583dbbb7820e6b35'
 _API_BASE = "http://49.235.137.221:8000"
-_AUTH_FILE = _P(__file__).resolve().parent / ".auth_ok"
+_PLUGIN_DIR = _P(__file__).resolve().parent
+_AUTH_FILE = _PLUGIN_DIR / ".auth_ok"
+_DEVICE_FILE = _PLUGIN_DIR / "device.json"
 _AUTH_ROUTE_PREFIX = f"/{_SAFE_PLUGIN_NAME}/auth"
 def _rotl32(value, shift):
     return ((value << shift) & 0xFFFFFFFF) | (value >> (32 - shift))
@@ -47,18 +49,60 @@ def _decrypt_source(data):
     if not _hm.compare_digest(tag, expected): raise ImportError("Encrypted module integrity check failed.")
     plain = _crypt(payload, nonce)
     return _z.decompress(plain).decode("utf-8-sig").lstrip("\ufeff")
-def _is_authorized():
+def _plugin_config_value(name):
+    config_path = _PLUGIN_DIR / "service.env"
     try:
-        payload = _json.loads(_AUTH_FILE.read_text(encoding="utf-8"))
-        return payload.get("ok") is True and payload.get("auth_scope") == _AUTH_SCOPE
+        for line in config_path.read_text(encoding="utf-8-sig").splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#") or "=" not in raw: continue
+            key, value = raw.split("=", 1)
+            if key.strip() == name: return value.strip().strip('"').strip("'")
     except Exception:
-        return False
+        pass
+    return _os.getenv(name, "").strip()
+def _normalize_instance_id(value):
+    return "".join(char for char in (value or "").strip().upper() if char.isalnum() or char in "_.-:")[:128]
+def _configured_instance_id():
+    env_value = _plugin_config_value("SHAOBKJ_INSTANCE_ID")
+    if env_value: return _normalize_instance_id(env_value)
+    try:
+        if _DEVICE_FILE.is_file():
+            payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8"))
+            return _normalize_instance_id(str(payload.get("instance_id") or ""))
+    except Exception:
+        pass
+    return ""
+def _device_fingerprint(anchor):
+    return _h.sha256(anchor.encode("utf-8", errors="ignore")).hexdigest()[:24]
+def _cloud_device_id(instance_id):
+    digest = _h.sha256(f"SHAOBKJ_CLOUD_DEVICE:{instance_id}".encode("utf-8", errors="ignore")).hexdigest()[:24].upper()
+    return f"SHAOBKJ-CLOUD-{digest}"
+def _write_device_config(payload):
+    try:
+        _DEVICE_FILE.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 def _device_payload():
+    instance_id = _configured_instance_id()
+    if instance_id:
+        anchor = f"cloud:{instance_id}"
+        payload = {"device_id": _cloud_device_id(instance_id), "device_type": "cloud", "instance_id": instance_id, "device_fingerprint": _device_fingerprint(anchor)}
+        _write_device_config(payload)
+        return {"device_id": payload["device_id"], "device_type": "cloud", "instance_id": instance_id}
+    try:
+        payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8")) if _DEVICE_FILE.is_file() else {}
+        device_id = str(payload.get("device_id") or "").strip()
+        if device_id and str(payload.get("device_type") or "local") == "local":
+            return {"device_id": device_id, "device_type": "local", "instance_id": ""}
+    except Exception:
+        payload = {}
     try:
         import uuid as _uuid
-        return {"device_id": f"RELEASE-{_SAFE_PLUGIN_NAME}-{_uuid.getnode():012x}", "device_type": "local", "instance_id": ""}
+        device_id = f"RELEASE-{_SAFE_PLUGIN_NAME}-{_uuid.getnode():012x}"
     except Exception:
-        return {"device_id": f"RELEASE-{_SAFE_PLUGIN_NAME}-LOCAL", "device_type": "local", "instance_id": ""}
+        device_id = f"RELEASE-{_SAFE_PLUGIN_NAME}-LOCAL"
+    _write_device_config({"device_id": device_id, "device_type": "local", "instance_id": ""})
+    return {"device_id": device_id, "device_type": "local", "instance_id": ""}
 def _remote_validate(access_key):
     access_key = (access_key or "").strip()
     if not access_key: return False
@@ -70,10 +114,26 @@ def _remote_validate(access_key):
     except Exception:
         return False
     return bool(data.get("valid")) and data.get("status") == "active"
+def _clear_auth():
+    try: _AUTH_FILE.unlink()
+    except Exception: pass
+def _is_authorized():
+    try:
+        payload = _json.loads(_AUTH_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    access_key = str(payload.get("access_key") or "").strip()
+    saved_device = payload.get("device") or {}
+    current_device = _device_payload()
+    if payload.get("ok") is not True or payload.get("auth_scope") != _AUTH_SCOPE or saved_device != current_device or not _remote_validate(access_key):
+        _clear_auth()
+        return False
+    return True
 def _save_auth(access_key):
     if not _remote_validate(access_key):
+        _clear_auth()
         return False
-    _AUTH_FILE.write_text(_json.dumps({"ok": True, "auth_scope": _AUTH_SCOPE}, ensure_ascii=False), encoding="utf-8")
+    _AUTH_FILE.write_text(_json.dumps({"ok": True, "auth_scope": _AUTH_SCOPE, "access_key": access_key.strip(), "device": _device_payload()}, ensure_ascii=False), encoding="utf-8")
     return True
 def _register_auth_routes():
     try:
@@ -84,7 +144,8 @@ def _register_auth_routes():
     routes = _PromptServer.instance.routes
     @routes.get(_AUTH_ROUTE_PREFIX + "/status")
     async def _shaobkj_release_auth_status(request):
-        return _web.json_response({"ok": _is_authorized()})
+        ok = _is_authorized()
+        return _web.json_response({"ok": ok, "message": "" if ok else "授权码停用或失效，请重新输入"})
     @routes.post(_AUTH_ROUTE_PREFIX + "/verify")
     async def _shaobkj_release_auth_verify(request):
         try:
