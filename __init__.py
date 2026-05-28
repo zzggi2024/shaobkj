@@ -77,31 +77,86 @@ def _device_fingerprint(anchor):
 def _cloud_device_id(instance_id):
     digest = _h.sha256(f"SHAOBKJ_CLOUD_DEVICE:{instance_id}".encode("utf-8", errors="ignore")).hexdigest()[:24].upper()
     return f"SHAOBKJ-CLOUD-{digest}"
+def _read_text_file(path):
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore").strip()
+    except Exception:
+        return ""
+def _clean_anchor_value(value):
+    value = (value or "").strip().strip("\x00")
+    lowered = value.lower()
+    if not value or lowered in ('none', 'unknown', 'not specified', 'to be filled by o.e.m.'):
+        return ""
+    return value
+def _read_dmi_anchor():
+    dmi_paths = [
+        ("dmi_product_uuid", _P("/sys/class/dmi/id/product_uuid")),
+        ("dmi_product_serial", _P("/sys/class/dmi/id/product_serial")),
+        ("dmi_board_serial", _P("/sys/class/dmi/id/board_serial")),
+    ]
+    for source, path in dmi_paths:
+        value = _clean_anchor_value(_read_text_file(path))
+        if value:
+            return f"local:{source}:{value}", source
+    return "", "none"
+def _read_container_anchor():
+    cgroup = _read_text_file(_P("/proc/self/cgroup"))
+    for raw_line in cgroup.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        tail = line.rsplit("/", 1)[-1].strip()
+        tail = tail.removeprefix("docker-").removesuffix(".scope")
+        if len(tail) >= 12 and all(char.isalnum() or char in "_.-" for char in tail):
+            return f"local:container_id:{tail}", "container_id"
+    hostname = _clean_anchor_value(_os.getenv("HOSTNAME") or _read_text_file(_P("/etc/hostname")))
+    if hostname:
+        return f"local:hostname:{hostname}", "hostname"
+    return "", "none"
+def _current_device_anchor():
+    instance_id = _configured_instance_id()
+    if instance_id:
+        return f"cloud:{instance_id}", "cloud_instance_id"
+    dmi_anchor, dmi_source = _read_dmi_anchor()
+    if dmi_anchor:
+        return dmi_anchor, dmi_source
+    container_anchor, container_source = _read_container_anchor()
+    if container_anchor:
+        return container_anchor, container_source
+    return "", "none"
 def _write_device_config(payload):
     try:
         _DEVICE_FILE.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
+def _local_device_id(fingerprint):
+    if fingerprint:
+        return f"RELEASE-{_SAFE_PLUGIN_NAME}-{fingerprint.upper()}"
+    return f"RELEASE-{_SAFE_PLUGIN_NAME}-LOCAL"
 def _device_payload():
+    current_anchor, anchor_source = _current_device_anchor()
+    current_fingerprint = _device_fingerprint(current_anchor) if current_anchor else ""
     instance_id = _configured_instance_id()
     if instance_id:
-        anchor = f"cloud:{instance_id}"
-        payload = {"device_id": _cloud_device_id(instance_id), "device_type": "cloud", "instance_id": instance_id, "device_fingerprint": _device_fingerprint(anchor)}
+        payload = {"device_id": _cloud_device_id(instance_id), "device_type": "cloud", "instance_id": instance_id, "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source}
         _write_device_config(payload)
         return {"device_id": payload["device_id"], "device_type": "cloud", "instance_id": instance_id}
     try:
         payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8")) if _DEVICE_FILE.is_file() else {}
         device_id = str(payload.get("device_id") or "").strip()
-        if device_id and str(payload.get("device_type") or "local") == "local":
+        saved_fingerprint = str(payload.get("device_fingerprint") or "").strip()
+        if device_id and not current_fingerprint:
+            return {"device_id": device_id, "device_type": "local", "instance_id": ""}
+        if device_id and not saved_fingerprint:
+            payload.update({"device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source})
+            _write_device_config(payload)
+            return {"device_id": device_id, "device_type": "local", "instance_id": ""}
+        if device_id and saved_fingerprint == current_fingerprint:
             return {"device_id": device_id, "device_type": "local", "instance_id": ""}
     except Exception:
-        payload = {}
-    try:
-        import uuid as _uuid
-        device_id = f"RELEASE-{_SAFE_PLUGIN_NAME}-{_uuid.getnode():012x}"
-    except Exception:
-        device_id = f"RELEASE-{_SAFE_PLUGIN_NAME}-LOCAL"
-    _write_device_config({"device_id": device_id, "device_type": "local", "instance_id": ""})
+        pass
+    device_id = _local_device_id(current_fingerprint)
+    _write_device_config({"device_id": device_id, "device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source})
     return {"device_id": device_id, "device_type": "local", "instance_id": ""}
 def _remote_validate(access_key):
     access_key = (access_key or "").strip()
