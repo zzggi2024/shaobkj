@@ -5,7 +5,10 @@ import importlib.abc as _ia
 import importlib.util as _iu
 import json as _json
 import os as _os
+import platform as _platform
+import secrets as _secrets
 import struct as _struct
+import subprocess as _subprocess
 import sys as _s
 import urllib.request as _ur
 import urllib.error as _ue
@@ -108,14 +111,71 @@ def _clean_anchor_value(value):
     return value
 def _read_dmi_anchor():
     dmi_paths = [
+        ("dmi_machine_id", _P("/etc/machine-id")),
         ("dmi_product_uuid", _P("/sys/class/dmi/id/product_uuid")),
         ("dmi_product_serial", _P("/sys/class/dmi/id/product_serial")),
         ("dmi_board_serial", _P("/sys/class/dmi/id/board_serial")),
     ]
+    values = []
     for source, path in dmi_paths:
         value = _clean_anchor_value(_read_text_file(path))
         if value:
-            return f"local:{source}:{value}", source
+            values.append(f"{source}={value}")
+    if values:
+        return "local:linux:" + "|".join(values), "linux_machine"
+    return "", "none"
+def _read_command_value(command):
+    try:
+        result = _subprocess.run(command, capture_output=True, text=True, timeout=3, shell=False)
+        if result.returncode != 0:
+            return ""
+        lines = [_clean_anchor_value(line) for line in (result.stdout or "").splitlines()]
+        lines = [line for line in lines if line and not line.lower().startswith(("uuid", "serialnumber", "identifyingnumber"))]
+        return lines[0] if lines else ""
+    except Exception:
+        return ""
+def _read_windows_anchor():
+    values = []
+    try:
+        import winreg as _winreg
+        with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as key:
+            value, _ = _winreg.QueryValueEx(key, "MachineGuid")
+            value = _clean_anchor_value(str(value))
+            if value:
+                values.append(f"machine_guid={value}")
+    except Exception:
+        pass
+    commands = [
+        ("csproduct_uuid", ["wmic", "csproduct", "get", "UUID"]),
+        ("bios_serial", ["wmic", "bios", "get", "SerialNumber"]),
+        ("baseboard_serial", ["wmic", "baseboard", "get", "SerialNumber"]),
+    ]
+    for source, command in commands:
+        value = _clean_anchor_value(_read_command_value(command))
+        if value:
+            values.append(f"{source}={value}")
+    computer_name = _clean_anchor_value(_os.getenv("COMPUTERNAME") or _platform.node())
+    if computer_name:
+        values.append(f"computer_name={computer_name}")
+    if values:
+        return "local:windows:" + "|".join(values), "windows_machine"
+    return "", "none"
+def _read_platform_anchor():
+    system_name = (_platform.system() or "").lower()
+    if system_name == "windows":
+        return _read_windows_anchor()
+    if system_name == "darwin":
+        values = []
+        value = _clean_anchor_value(_read_command_value(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"]))
+        if "IOPlatformUUID" in value:
+            value = value.split("IOPlatformUUID", 1)[-1].strip().strip(' ="')
+        if value:
+            values.append(f"platform_uuid={value}")
+        hostname = _clean_anchor_value(_platform.node())
+        if hostname:
+            values.append(f"hostname={hostname}")
+        if values:
+            return "local:darwin:" + "|".join(values), "darwin_machine"
     return "", "none"
 def _read_container_anchor():
     cgroup = _read_text_file(_P("/proc/self/cgroup"))
@@ -135,12 +195,24 @@ def _current_device_anchor():
     instance_id = _configured_instance_id()
     if instance_id:
         return f"cloud:{instance_id}", "cloud_instance_id"
+    platform_anchor, platform_source = _read_platform_anchor()
+    if platform_anchor:
+        return platform_anchor, platform_source
     dmi_anchor, dmi_source = _read_dmi_anchor()
     if dmi_anchor:
         return dmi_anchor, dmi_source
     container_anchor, container_source = _read_container_anchor()
     if container_anchor:
         return container_anchor, container_source
+    fallback_values = []
+    hostname = _clean_anchor_value(_platform.node() or _os.getenv("HOSTNAME"))
+    if hostname:
+        fallback_values.append(f"hostname={hostname}")
+    user_name = _clean_anchor_value(_os.getenv("USERNAME") or _os.getenv("USER"))
+    if user_name:
+        fallback_values.append(f"user={user_name}")
+    if fallback_values:
+        return "local:fallback:" + "|".join(fallback_values), "fallback_machine"
     return "", "none"
 def _write_device_config(payload):
     try:
@@ -148,9 +220,7 @@ def _write_device_config(payload):
     except Exception:
         pass
 def _local_device_id(fingerprint):
-    if fingerprint:
-        return f"RELEASE-{_SAFE_PLUGIN_NAME}-{fingerprint.upper()}"
-    return f"RELEASE-{_SAFE_PLUGIN_NAME}-LOCAL"
+    return f"RELEASE-{_SAFE_PLUGIN_NAME}-{_secrets.token_hex(16).upper()}"
 def _device_response_payload(device_identity):
     device_id = device_identity.get("device_id") or ""
     return {
@@ -173,14 +243,7 @@ def _device_payload():
         payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8")) if _DEVICE_FILE.is_file() else {}
         device_id = str(payload.get("device_id") or "").strip()
         saved_fingerprint = str(payload.get("device_fingerprint") or "").strip()
-        if device_id and not current_fingerprint:
-            payload.update({"device_id": device_id, "device_type": "local", "instance_id": "", "cloud_runtime": _is_cloud_runtime()})
-            return _device_response_payload(payload)
-        if device_id and not saved_fingerprint:
-            payload.update({"device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()})
-            _write_device_config(payload)
-            return _device_response_payload(payload)
-        if device_id and saved_fingerprint == current_fingerprint:
+        if device_id and saved_fingerprint and saved_fingerprint == current_fingerprint:
             payload.update({"device_type": "local", "instance_id": "", "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()})
             return _device_response_payload(payload)
     except Exception:
