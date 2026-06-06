@@ -3,9 +3,15 @@ import { api } from "../../scripts/api.js";
 
 const NODE_CLASS_NAME = "Shaobkj_Loop_Trigger";
 const watchedNodes = new Map();
+const stoppedNodes = new Set();
 let pollTimer = null;
 let queueListenerBound = false;
 let feedbackListenerBound = false;
+let loopQueueRunning = false;
+
+function sleep(ms) {
+	return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 function findWidget(node, name) {
 	return Array.isArray(node?.widgets) ? node.widgets.find((widget) => widget?.name === name) : null;
@@ -42,6 +48,22 @@ function setWidgetHiddenState(widget, hidden) {
 	}
 }
 
+function looksLikePath(value) {
+	const text = String(value ?? "").trim();
+	return Boolean(text) && (/[a-zA-Z]:[\\/]/.test(text) || text.includes("\\") || text.includes("/"));
+}
+
+function collectStringValues(value, result = []) {
+	if (typeof value === "string" && value.trim()) {
+		result.push(value.trim());
+	} else if (Array.isArray(value)) {
+		for (const item of value) {
+			collectStringValues(item, result);
+		}
+	}
+	return result;
+}
+
 function getLinkedTextValue(node, inputName) {
 	try {
 		if (!node || !node.graph || !Array.isArray(node.inputs)) {
@@ -56,21 +78,34 @@ function getLinkedTextValue(node, inputName) {
 			return "";
 		}
 		const originNode = node.graph.getNodeById ? node.graph.getNodeById(link.origin_id) : null;
-		if (!originNode || !Array.isArray(originNode.widgets)) {
+		if (!originNode) {
 			return "";
 		}
-		for (const widget of originNode.widgets) {
-			if (typeof widget?.value === "string" && widget.value.trim()) {
-				return widget.value.trim();
+		const values = [];
+		if (Array.isArray(originNode.widgets)) {
+			for (const widget of originNode.widgets) {
+				collectStringValues(widget?.value, values);
 			}
 		}
-		return "";
+		collectStringValues(originNode.widgets_values, values);
+		return values.find(looksLikePath) || values[0] || "";
 	} catch {
 		return "";
 	}
 }
 
+function hasLinkedInput(node, inputName) {
+	const input = node.inputs?.find((item) => item?.name === inputName);
+	return Boolean(input && input.link != null);
+}
+
 function resolveFolderPath(node) {
+	if (hasLinkedInput(node, "文件夹路径")) {
+		const linkedValue = getLinkedTextValue(node, "文件夹路径");
+		if (linkedValue) {
+			return linkedValue;
+		}
+	}
 	const pathWidget = findWidget(node, "文件夹路径");
 	const widgetValue = String(pathWidget?.value ?? "").trim();
 	if (widgetValue) {
@@ -79,11 +114,21 @@ function resolveFolderPath(node) {
 	return getLinkedTextValue(node, "文件夹路径");
 }
 
-async function scanFolder(path) {
+function getIncludeSubdirsValue(node) {
+	const widget = findWidget(node, "包含子文件夹");
+	return widget ? Boolean(widget.value) : true;
+}
+
+function getCurrentIndexValue(node) {
+	const widget = findWidget(node, "当前执行编号");
+	return Number(widget?.value ?? 0);
+}
+
+async function scanFolder(path, includeSubdirs = true) {
 	const response = await api.fetchApi("/shaobkj/loop_trigger/scan", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ path }),
+		body: JSON.stringify({ path, include_subdirs: includeSubdirs }),
 	});
 	const data = await response.json();
 	if (!response.ok || data?.status !== "success") {
@@ -92,21 +137,48 @@ async function scanFolder(path) {
 	return data;
 }
 
-function showMessage(message) {
+function showMessage(message, duration = 1800) {
 	if (app?.ui?.dialog?.show) {
 		app.ui.dialog.show(message);
-		setTimeout(() => app.ui.dialog.close(), 1800);
+		setTimeout(() => app.ui.dialog.close(), duration);
 		return;
 	}
 	alert(message);
 }
 
-async function initializeFolder(node, path) {
+async function stopLoopTasks(node) {
+	const nodeId = String(node?.id ?? "");
+	if (nodeId) {
+		stoppedNodes.add(nodeId);
+	}
+	setWidgetValue(node, "mode", false);
+	setWidgetValue(node, "当前执行编号", 0);
+	try {
+		await api.fetchApi("/queue", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ clear: true }),
+		});
+	} catch (error) {
+		console.warn("[Shaobkj] 停止未执行任务失败:", error);
+	}
+	showMessage("已停止未执行的循环任务");
+}
+
+function resetLoopStoppedState(node) {
+	const nodeId = String(node?.id ?? "");
+	if (nodeId) {
+		stoppedNodes.delete(nodeId);
+	}
+}
+
+async function initializeFolder(node, path, includeSubdirs = true) {
 	const response = await api.fetchApi("/shaobkj/loop_trigger/initialize", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({
 			path,
+			include_subdirs: includeSubdirs,
 			unique_id: String(node?.id ?? ""),
 		}),
 	});
@@ -135,7 +207,11 @@ async function syncNodeFolderState(node, options = {}) {
 		return;
 	}
 
-	const result = fromInit ? await initializeFolder(node, folderPath) : await scanFolder(folderPath);
+	const includeSubdirs = getIncludeSubdirsValue(node);
+	if (fromInit) {
+		pathWidget.value = folderPath;
+	}
+	const result = fromInit ? await initializeFolder(node, folderPath, includeSubdirs) : await scanFolder(folderPath, includeSubdirs);
 	if (!result?.exists || !result?.is_dir) {
 		if (fromInit && !silent) {
 			throw new Error("文件夹不存在或路径无效");
@@ -148,6 +224,7 @@ async function syncNodeFolderState(node, options = {}) {
 			signature: "",
 			total: 0,
 			initialized: false,
+			includeSubdirs,
 		});
 		return;
 	}
@@ -158,9 +235,10 @@ async function syncNodeFolderState(node, options = {}) {
 	if (totalChanged) {
 		totalWidget.value = total;
 	}
-	if (totalChanged || fromInit) {
+	if (Number(forceWidget.value ?? 0) !== total) {
 		forceWidget.value = total;
 	}
+
 	if (fromInit) {
 		setWidgetValue(node, "当前执行编号", 0);
 	}
@@ -171,24 +249,21 @@ async function syncNodeFolderState(node, options = {}) {
 		signature: String(result.signature ?? ""),
 		total,
 		initialized: true,
+		includeSubdirs,
 	});
 
 	if (!silent && fromInit) {
-		showMessage(`已初始化，检测到 ${total} 张图片`);
+		console.log("[Shaobkj] 循环触发初始化诊断:", result);
+		showMessage(`成功加载 ${total} 张图片`, 3000);
 	}
 }
 
 async function pollLoopTriggerNodes() {
 	const nodesById = app?.graph?._nodes_by_id ?? {};
-	for (const [nodeId, state] of Array.from(watchedNodes.entries())) {
+	for (const [nodeId] of Array.from(watchedNodes.entries())) {
 		const node = nodesById[nodeId];
 		if (!node) {
 			watchedNodes.delete(nodeId);
-			continue;
-		}
-
-		const stateInitialized = Boolean(state?.initialized);
-		if (!stateInitialized) {
 			continue;
 		}
 
@@ -197,21 +272,13 @@ async function pollLoopTriggerNodes() {
 			continue;
 		}
 
+		if (getCurrentIndexValue(node) > 0) {
+			continue;
+		}
 		try {
-			const result = await scanFolder(folderPath);
-			const signature = String(result.signature ?? "");
-			const total = Number(result.total ?? 0);
-			if (signature !== state.signature || total !== state.total || folderPath !== state.path) {
-				setWidgetValue(node, "总数", total);
-				watchedNodes.set(nodeId, {
-					path: folderPath,
-					signature,
-					total,
-					initialized: true,
-				});
-			}
+			await syncNodeFolderState(node, { silent: true });
 		} catch (error) {
-			console.warn("[Shaobkj] 循环触发扫描失败:", error);
+			console.warn("[Shaobkj] 循环触发自动初始化失败:", error);
 		}
 	}
 }
@@ -225,6 +292,38 @@ function startPolling() {
 			console.warn("[Shaobkj] 循环触发轮询失败:", error);
 		});
 	}, 2000);
+}
+
+async function queueLoopPrompt(nodeId) {
+	if (nodeId && stoppedNodes.has(nodeId)) {
+		return;
+	}
+	if (loopQueueRunning) {
+		return;
+	}
+	loopQueueRunning = true;
+	try {
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			if (nodeId && stoppedNodes.has(nodeId)) {
+				return;
+			}
+			try {
+				await sleep(800);
+				if (nodeId && stoppedNodes.has(nodeId)) {
+					return;
+				}
+				await app.queuePrompt(0);
+				return;
+			} catch (error) {
+				console.warn(`[Shaobkj] 循环触发续队列失败，第 ${attempt} 次:`, error);
+				if (attempt < 3) {
+					await sleep(1000);
+				}
+			}
+		}
+	} finally {
+		loopQueueRunning = false;
+	}
 }
 
 function bindLoopTriggerEvents() {
@@ -244,8 +343,10 @@ function bindLoopTriggerEvents() {
 	}
 
 	if (!queueListenerBound) {
-		api.addEventListener("shaobkj.loop_trigger.add_queue", async () => {
-			await app.queuePrompt(0, 1);
+		api.addEventListener("shaobkj.loop_trigger.add_queue", async (evt) => {
+			const detail = evt?.detail ?? null;
+			const nodeId = detail?.node_id ? String(detail.node_id) : "";
+			await queueLoopPrompt(nodeId);
 		});
 		queueListenerBound = true;
 	}
@@ -284,6 +385,7 @@ function enhanceLoopTriggerNode(node) {
 	const existingInitButton = findWidget(node, "初始化");
 	if (!existingInitButton) {
 		const initButton = node.addWidget("button", "初始化", "Init", () => {
+			resetLoopStoppedState(node);
 			syncNodeFolderState(node, { fromInit: true }).catch((error) => {
 				showMessage(String(error?.message || error));
 			});
@@ -296,9 +398,27 @@ function enhanceLoopTriggerNode(node) {
 		existingInitButton.label = "⟳ 初始化";
 		existingInitButton.serialize = false;
 		existingInitButton.callback = () => {
+			resetLoopStoppedState(node);
 			syncNodeFolderState(node, { fromInit: true }).catch((error) => {
 				showMessage(String(error?.message || error));
 			});
+		};
+	}
+
+	const existingStopButton = findWidget(node, "停止任务");
+	if (!existingStopButton) {
+		const stopButton = node.addWidget("button", "停止任务", "Stop", () => {
+			stopLoopTasks(node);
+		});
+		stopButton.name = "停止任务";
+		stopButton.label = "■ 停止任务";
+		stopButton.serialize = false;
+		stopButton.tooltip = "停止当前循环触发，并清空未执行的队列任务";
+	} else {
+		existingStopButton.label = "■ 停止任务";
+		existingStopButton.serialize = false;
+		existingStopButton.callback = () => {
+			stopLoopTasks(node);
 		};
 	}
 
@@ -321,7 +441,9 @@ function enhanceLoopTriggerNode(node) {
 
 	const originalOnRemoved = node.onRemoved;
 	node.onRemoved = function (...args) {
-		watchedNodes.delete(String(node.id));
+		const nodeId = String(node.id);
+		watchedNodes.delete(nodeId);
+		stoppedNodes.delete(nodeId);
 		if (typeof originalOnRemoved === "function") {
 			return originalOnRemoved.apply(this, args);
 		}
@@ -333,6 +455,7 @@ function enhanceLoopTriggerNode(node) {
 		signature: "",
 		total: Number(findWidget(node, "总数")?.value ?? 0),
 		initialized: false,
+		includeSubdirs: getIncludeSubdirsValue(node),
 	});
 
 	node.setDirtyCanvas?.(true, true);
