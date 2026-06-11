@@ -10,6 +10,7 @@ import secrets as _secrets
 import struct as _struct
 import subprocess as _subprocess
 import sys as _s
+import time as _time
 import urllib.request as _ur
 import urllib.error as _ue
 import zlib as _z
@@ -23,6 +24,7 @@ _API_BASE = "http://49.235.137.221:8000"
 _PLUGIN_DIR = _P(__file__).resolve().parent
 _AUTH_FILE = _PLUGIN_DIR / ".auth_ok"
 _DEVICE_FILE = _PLUGIN_DIR / "device.json"
+_AUTH_CHECK_INTERVAL_SECONDS = 86400
 _AUTH_ROUTE_PREFIX = f"/{_SAFE_PLUGIN_NAME}/auth"
 def _rotl32(value, shift):
     return ((value << shift) & 0xFFFFFFFF) | (value >> (32 - shift))
@@ -274,15 +276,26 @@ def _is_authorized():
     access_key = str(payload.get("access_key") or "").strip()
     saved_device = payload.get("device") or {}
     current_device = _device_payload()
-    if payload.get("ok") is not True or payload.get("auth_scope") != _AUTH_SCOPE or saved_device != current_device or not _remote_validate(access_key):
+    validated_at = float(payload.get("validated_at") or 0)
+    if payload.get("ok") is not True or payload.get("auth_scope") != _AUTH_SCOPE or saved_device != current_device:
         _clear_auth()
         return False
+    if _time.time() - validated_at < _AUTH_CHECK_INTERVAL_SECONDS:
+        return True
+    if not _remote_validate(access_key):
+        _clear_auth()
+        return False
+    payload["validated_at"] = _time.time()
+    try:
+        _AUTH_FILE.write_text(_json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
     return True
 def _save_auth(access_key):
     if not _remote_validate(access_key):
         _clear_auth()
         return False
-    _AUTH_FILE.write_text(_json.dumps({"ok": True, "auth_scope": _AUTH_SCOPE, "access_key": access_key.strip(), "device": _device_payload()}, ensure_ascii=False), encoding="utf-8")
+    _AUTH_FILE.write_text(_json.dumps({"ok": True, "auth_scope": _AUTH_SCOPE, "access_key": access_key.strip(), "device": _device_payload(), "validated_at": _time.time()}, ensure_ascii=False), encoding="utf-8")
     return True
 def _set_configured_instance_id(instance_id):
     normalized = _normalize_instance_id(instance_id)

@@ -244,6 +244,6 @@ app.registerExtension({
             }
         };
         setTimeout(runCheck, 500);
-        setInterval(runCheck, 600000);
+        setInterval(runCheck, 86400000);
     },
 });
