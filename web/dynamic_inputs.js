@@ -19,7 +19,7 @@ const DYNAMIC_NODES = [
     "🤖 Shaobkj -Veo视频",
     "🎬 SD_2.0视频",
     "🎬 Grok视频",
-    "🎬 Grok3 Video",
+    "🎬 Grok-Video-测试",
     "🎬 shaobkj-grok-3视频生成",
     "🎨 豆包图像生成",
     "Shaobkj_ConcurrentImageEdit_Sender",
@@ -115,7 +115,7 @@ const THEME_CONFIG = {
     "🤖 Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 SD_2.0视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 Grok视频": { color: "#0091EA", bgcolor: "#001A2E" },
-    "🎬 Grok3 Video": { color: "#0091EA", bgcolor: "#001A2E" },
+    "🎬 Grok-Video-测试": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
 
@@ -290,7 +290,7 @@ function getDynamicInputSpec(node) {
             legacyNames: ["参考图"],
         };
     }
-    if (t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok3 Video")))) {
+    if (t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok-Video-测试")))) {
         return {
             prefix: "参考图",
             slotType: "IMAGE",
@@ -567,13 +567,13 @@ function setupNanoBananaEditingMode(node) {
 function setupGrokVideoDurationMode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
-    if (!(t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || t === "Shaobkj_Grok3_Video_Generate" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok3 Video") || title.includes("shaobkj-grok-3视频生成"))))) {
+    if (!(t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || t === "Shaobkj_Grok3_Video_Generate" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok-Video-测试") || title.includes("shaobkj-grok-3视频生成"))))) {
 
         return false;
     }
     if (!node.widgets) return false;
 
-    const modelWidget = findWidgetByNames(node, ["模型"]);
+    const modelWidget = findWidgetByNames(node, ["模型选择", "模型"]);
     const durationWidget = findWidgetByNames(node, ["生成时长"]);
     if (!modelWidget || !durationWidget) return false;
 

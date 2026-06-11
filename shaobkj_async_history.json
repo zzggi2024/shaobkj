@@ -1,0 +1,130 @@
+{
+    "batch_1780983691_6306_0": {
+        "status": "success",
+        "submitted_at": 1780983691,
+        "prompt": "White background composite Amazon main image, squa...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_2.png",
+        "completed_at": 1780983768
+    },
+    "batch_1780983691_6306_1": {
+        "status": "success",
+        "submitted_at": 1780983692,
+        "prompt": "Outdoor off-road lifestyle scene, Jeep Wrangler JL...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image.png",
+        "completed_at": 1780983749
+    },
+    "batch_1780983691_6306_2": {
+        "status": "success",
+        "submitted_at": 1780983693,
+        "prompt": "Compatibility infographic for Jeep Wrangler JL 4 D...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_3.png",
+        "completed_at": 1780983799
+    },
+    "batch_1780983691_6306_3": {
+        "status": "success",
+        "submitted_at": 1780983694,
+        "prompt": "Alternative compatibility infographic for Jeep Wra...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_1.png",
+        "completed_at": 1780983757
+    },
+    "batch_1780983691_6306_4": {
+        "status": "success",
+        "submitted_at": 1780983695,
+        "prompt": "Macro detail hero image focused on the orange step...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_6.png",
+        "completed_at": 1780983861
+    },
+    "batch_1780983691_6306_5": {
+        "status": "success",
+        "submitted_at": 1780983749,
+        "prompt": "Protection and high performance lifestyle scene, J...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_4.png",
+        "completed_at": 1780983825
+    },
+    "batch_1780983691_6306_6": {
+        "status": "success",
+        "submitted_at": 1780983757,
+        "prompt": "Technical dimension chart on a dark textured backg...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_5.png",
+        "completed_at": 1780983835
+    },
+    "batch_1780985854_9077_0": {
+        "status": "success",
+        "submitted_at": 1780985854,
+        "prompt": "Premium Amazon product banner for Jeep Wrangler JL...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_10.png",
+        "completed_at": 1780985951
+    },
+    "batch_1780985854_9077_1": {
+        "status": "success",
+        "submitted_at": 1780985855,
+        "prompt": "Show a Jeep Wrangler JL 4 Door 2018 to 2026 side p...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_11.png",
+        "completed_at": 1780985953
+    },
+    "batch_1780985854_9077_2": {
+        "status": "success",
+        "submitted_at": 1780985856,
+        "prompt": "Create a detailed feature showcase of the orange r...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_9.png",
+        "completed_at": 1780985916
+    },
+    "batch_1780985854_9077_3": {
+        "status": "failed",
+        "submitted_at": 1780985857,
+        "prompt": "Ultra-detailed product showcase of the orange runn...",
+        "type": "gen_batch",
+        "error": "HTTPSConnectionPool(host='yhmx.work', port=443): Max retries exceeded with url: /v1beta/models/gemini-3-pro-image-preview:generateContent (Caused by ProxyError('Cannot connect to proxy.', ConnectionResetError(10054, '远程主机强迫关闭了一个现有的连接。', None, 10054, None)))",
+        "completed_at": 1780986092
+    },
+    "batch_1780985854_9077_4": {
+        "status": "success",
+        "submitted_at": 1780985858,
+        "prompt": "Create a strong Amazon comparison banner with a sp...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_12.png",
+        "completed_at": 1780985966
+    },
+    "batch_1780985854_9077_5": {
+        "status": "success",
+        "submitted_at": 1780985916,
+        "prompt": "Premium benefit graphic focusing on the 7 inch ult...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_13.png",
+        "completed_at": 1780985993
+    },
+    "batch_1780985854_9077_6": {
+        "status": "success",
+        "submitted_at": 1780985951,
+        "prompt": "Premium material and anti-rust showcase for the or...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_14.png",
+        "completed_at": 1780986019
+    },
+    "batch_1780985854_9077_7": {
+        "status": "success",
+        "submitted_at": 1780985953,
+        "prompt": "Create a split-screen multifunctional scene for Je...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_16.png",
+        "completed_at": 1780986073
+    },
+    "batch_1780985854_9077_8": {
+        "status": "success",
+        "submitted_at": 1780985966,
+        "prompt": "Create a split-screen multifunctional protection a...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_15.png",
+        "completed_at": 1780986031
+    }
+}
