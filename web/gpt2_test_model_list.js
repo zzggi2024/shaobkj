@@ -1,14 +1,13 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const NODE_NAME = "Shaobkj_TestAPINode";
+const NODE_NAME = "Shaobkj_GPT2Test_Node";
 const API_KEY_WIDGET = "API密钥";
 const API_BASE_WIDGET = "API地址";
-const PROXY_WIDGET = "使用系统代理";
 const MODEL_WIDGET = "模型选择";
 const MODEL_SELECT_WIDGET = "可用模型列表";
 const FETCH_BUTTON = "获取模型列表";
-const DEFAULT_MODELS = ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"];
+const DEFAULT_MODELS = ["gpt-image-2"];
 let lastPointer = { x: window.innerWidth / 2, y: 72 };
 
 window.addEventListener("pointerdown", (event) => {
@@ -47,27 +46,22 @@ function setWidgetValue(widget, value) {
 	}
 }
 
-function setModelOptions(node, models, selectedValue) {
+function setModelOptions(node, models, selectedValue, updateModelWidget = false) {
 	const modelWidget = findWidget(node, MODEL_WIDGET);
 	const selectWidget = findWidget(node, MODEL_SELECT_WIDGET);
 	const uniqueModels = Array.from(new Set((models || []).filter(Boolean)));
 	const options = uniqueModels.length ? uniqueModels : DEFAULT_MODELS;
-	const selected = selectedValue || options[0] || "gemini-3-pro-image-preview";
+	const currentModel = String(modelWidget?.value || "").trim();
+	const selected = selectedValue || (currentModel && options.includes(currentModel) ? currentModel : options[0]) || "gpt-image-2";
 
 	if (selectWidget) {
 		selectWidget.options = selectWidget.options || {};
 		selectWidget.options.values = options;
 		setWidgetValue(selectWidget, selected);
 	}
-	if (modelWidget) {
+	if (updateModelWidget && modelWidget) {
 		setWidgetValue(modelWidget, selected);
 	}
-}
-
-function hideWidget(widget) {
-	widget.type = "hidden";
-	widget.computeSize = () => [0, -4];
-	widget.draw = () => {};
 }
 
 function getLinkedWidgetValue(node, inputName) {
@@ -108,16 +102,15 @@ async function fetchModels(node, buttonWidget) {
 	const modelWidget = findWidget(node, MODEL_WIDGET);
 	const apiKey = getWidgetOrLinkedValue(node, API_KEY_WIDGET);
 	const apiBase = getWidgetOrLinkedValue(node, API_BASE_WIDGET);
-	const proxyWidget = findWidget(node, PROXY_WIDGET);
-	const useProxy = proxyWidget ? Boolean(proxyWidget.value) : true;
+	const useProxy = false;
 	if (!modelWidget) {
 		showToast("请到后台查看具体错误", true);
-		console.warn("[Shaobkj-测试API] 未找到模型选择控件");
+		console.warn("[Shaobkj-gpt-2-测试] 未找到模型选择控件");
 		return;
 	}
 	if (!apiKey || !apiBase) {
 		showToast("请到后台查看具体错误", true);
-		console.warn("[Shaobkj-测试API] API密钥或API地址为空", { apiKeySet: Boolean(apiKey), apiBase });
+		console.warn("[Shaobkj-gpt-2-测试] API密钥或API地址为空", { apiKeySet: Boolean(apiKey), apiBase });
 		return;
 	}
 
@@ -139,11 +132,13 @@ async function fetchModels(node, buttonWidget) {
 		if (!models.length) {
 			throw new Error("请到后台查看具体错误");
 		}
-		setModelOptions(node, models, models[0]);
+		const currentModel = String(modelWidget.value || "").trim();
+		const selectedModel = currentModel && models.includes(currentModel) ? currentModel : models[0];
+		setModelOptions(node, models, selectedModel, !currentModel || !models.includes(currentModel));
 		showToast("模型更新成功");
 	} catch (error) {
 		showToast("请到后台查看具体错误", true);
-		console.warn("[Shaobkj-测试API]", error);
+		console.warn("[Shaobkj-gpt-2-测试]", error);
 	} finally {
 		buttonWidget.name = oldName;
 		node.setDirtyCanvas?.(true, true);
@@ -151,16 +146,12 @@ async function fetchModels(node, buttonWidget) {
 }
 
 function setupModelFetcher(node) {
-	const proxyWidget = findWidget(node, PROXY_WIDGET) || findWidget(node, FETCH_BUTTON);
 	const modelWidget = findWidget(node, MODEL_WIDGET);
-	if (!proxyWidget || !modelWidget || node.__shaobkjTestApiModelFetcherReady) {
+	if (!modelWidget || node.__shaobkjGpt2TestModelFetcherReady) {
 		return;
 	}
-	node.__shaobkjTestApiModelFetcherReady = true;
-	proxyWidget.name = PROXY_WIDGET;
-	proxyWidget.value = proxyWidget.value === undefined ? true : Boolean(proxyWidget.value);
-	hideWidget(proxyWidget);
-	setModelOptions(node, DEFAULT_MODELS, modelWidget.value || "gemini-3-pro-image-preview");
+	node.__shaobkjGpt2TestModelFetcherReady = true;
+	setModelOptions(node, DEFAULT_MODELS, modelWidget.value || "gpt-image-2", false);
 
 	const buttonWidget = node.addWidget("button", FETCH_BUTTON, null, () => fetchModels(node, buttonWidget));
 	buttonWidget.serialize = false;
@@ -168,19 +159,10 @@ function setupModelFetcher(node) {
 		setWidgetValue(modelWidget, value);
 	}, { values: DEFAULT_MODELS });
 	selectWidget.serialize = false;
-
-	const proxyIndex = node.widgets.indexOf(proxyWidget);
-	const buttonIndex = node.widgets.indexOf(buttonWidget);
-	const selectIndex = node.widgets.indexOf(selectWidget);
-	if (proxyIndex > -1 && buttonIndex > -1 && selectIndex > -1) {
-		node.widgets.splice(selectIndex, 1);
-		node.widgets.splice(buttonIndex, 1);
-		node.widgets.splice(proxyIndex + 1, 0, buttonWidget, selectWidget);
-	}
 }
 
 app.registerExtension({
-	name: "Shaobkj.TestApiModelList",
+	name: "Shaobkj.GPT2TestModelList",
 	async beforeRegisterNodeDef(nodeType, nodeData) {
 		if (nodeData.name !== NODE_NAME) {
 			return;
