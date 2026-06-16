@@ -11,6 +11,7 @@ import struct as _struct
 import subprocess as _subprocess
 import sys as _s
 import time as _time
+import ctypes as _ctypes
 import urllib.request as _ur
 import urllib.error as _ue
 import zlib as _z
@@ -216,13 +217,52 @@ def _current_device_anchor():
     if fallback_values:
         return "local:fallback:" + "|".join(fallback_values), "fallback_machine"
     return "", "none"
+def _set_hidden_file(path):
+    try:
+        if _platform.system().lower() == "windows":
+            FILE_ATTRIBUTE_HIDDEN = 0x02
+            _ctypes.windll.kernel32.SetFileAttributesW(str(path), FILE_ATTRIBUTE_HIDDEN)
+    except Exception:
+        pass
+
 def _write_device_config(payload):
     try:
         _DEVICE_FILE.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _set_hidden_file(_DEVICE_FILE)
     except Exception:
         pass
+
+def _fallback_device_cache_path():
+    return _PLUGIN_DIR / ".device_cache"
+
+def _load_fallback_device_id():
+    cache_path = _fallback_device_cache_path()
+    try:
+        if cache_path.is_file():
+            payload = _json.loads(cache_path.read_text(encoding="utf-8"))
+            device_id = str(payload.get("device_id") or "").strip()
+            if device_id:
+                return payload
+    except Exception:
+        pass
+    return {}
+
+def _save_fallback_device_id(payload):
+    try:
+        cache_path = _fallback_device_cache_path()
+        cache_path.write_text(_json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _set_hidden_file(cache_path)
+    except Exception:
+        pass
+
 def _local_device_id(fingerprint):
-    return f"RELEASE-{_SAFE_PLUGIN_NAME}-{_secrets.token_hex(16).upper()}"
+    cached = _load_fallback_device_id()
+    device_id = str(cached.get("device_id") or "").strip()
+    if device_id:
+        return device_id
+    device_id = f"RELEASE-{_SAFE_PLUGIN_NAME}-{_secrets.token_hex(16).upper()}"
+    _save_fallback_device_id({"device_id": device_id, "fingerprint": fingerprint})
+    return device_id
 def _device_response_payload(device_identity):
     device_id = device_identity.get("device_id") or ""
     return {
