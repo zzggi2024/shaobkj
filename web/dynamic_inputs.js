@@ -3,26 +3,14 @@ import { app } from "/scripts/app.js";
 
 const DYNAMIC_NODES = [
     "Shaobkj_APINode",
-    "Shaobkj_TestAPINode",
     "🤖图像生成",
-    "🧪测试API",
     "Shaobkj_GPT2Edits_Node",
     "🖼️ gpt-2-Edits",
-    "Shaobkj_GPT2Test_Node",
-    "🧪 gpt-2-测试",
-    "Shaobkj_Sora_Video", 
-    "Shaobkj_Veo_Video",
     "Shaobkj_SD20_Video",
     "Shaobkj_Grok_Video",
-    "Shaobkj_Grok3_Video",
-    "Shaobkj_Grok3_Video_Generate",
     "Shaobkj_Doubao_Image",
-    "🤖 Shaobkj -Sora视频", 
-    "🤖 Shaobkj -Veo视频",
     "🎬 SD_2.0视频",
     "🎬 Grok视频",
-    "🎬 Grok-Video-测试",
-    "🎬 shaobkj-grok-3视频生成",
     "🎨 豆包图像生成",
     "Shaobkj_ConcurrentImageEdit_Sender",
     "🤖并发-编辑-图像驱动",
@@ -34,8 +22,6 @@ const DYNAMIC_NODES = [
     "🖼️ gpt-image-2 文本驱动并发",
     "Shaobkj_LLM_App",
     "🤖LLM应用",
-    "Shaobkj_LLM_Test_API",
-    "🧪LLM-测试API",
     "Shaobkj_Media_Reverse_Prompt",
     "🔍视频/图片-反推",
     "Shaobkj_NanoBanana_Prompt",
@@ -47,25 +33,18 @@ const DYNAMIC_NODES = [
     "Shaobkj_ZeroOneFloat",
     "0-1浮点",
 ];
+
 const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_APINode",
-    "Shaobkj_TestAPINode",
     "Shaobkj_APINode_Batch",
     "Shaobkj_GPTImage2_Batch_Node",
     "Shaobkj_GPT2Edits_Node",
-    "Shaobkj_GPT2Test_Node",
-    "Shaobkj_Sora_Video",
-    "Shaobkj_Veo_Video",
     "Shaobkj_SD20_Video",
     "Shaobkj_Grok_Video",
-    "Shaobkj_Grok3_Video",
-    "Shaobkj_Grok3_Video_Generate",
     "Shaobkj_Doubao_Image",
     "Shaobkj_ConcurrentImageEdit_Sender",
-
     "Shaobkj_GroupedConcurrentImageEdit",
     "Shaobkj_LLM_App",
-    "Shaobkj_LLM_Test_API",
     "Shaobkj_Media_Reverse_Prompt",
     "Shaobkj_NanoBanana_Prompt",
     "Shaobkj_Load_Image_Path",
@@ -78,6 +57,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_ImageSplit",
     "Shaobkj_ZeroOneFloat",
 ];
+
 const MIN_INPUTS = 2;
 let started = false;
 const LONG_SIDE_WIDGET_NAME = "长边设置";
@@ -90,14 +70,12 @@ const CONTROL_WIDGET_NAME = "control_after_generate";
 const THEME_CONFIG = {
     // 🔮 创世系列 (图像生成) - Electric Violet
     "Shaobkj_APINode": { color: "#7D24A6", bgcolor: "#1E0A29" },
-    "Shaobkj_TestAPINode": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_APINode_Batch": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_GPTImage2_Batch_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_GPT2Edits_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
-    "Shaobkj_GPT2Test_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_LLM_App": { color: "#7D24A6", bgcolor: "#1E0A29" },
-    "Shaobkj_LLM_Test_API": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_Doubao_Image": { color: "#7D24A6", bgcolor: "#1E0A29" },
+
 
     "Shaobkj_Media_Reverse_Prompt": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "文本-图像生成": { color: "#7D24A6", bgcolor: "#1E0A29" },
@@ -111,18 +89,11 @@ const THEME_CONFIG = {
     "🔍视频/图片-反推": { color: "#7D24A6", bgcolor: "#1E0A29" },
 
     // 🎬 导演系列 (视频生成) - Future Blue
-    "Shaobkj_Sora_Video": { color: "#0091EA", bgcolor: "#001A2E" },
-    "Shaobkj_Veo_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj_SD20_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj_Grok_Video": { color: "#0091EA", bgcolor: "#001A2E" },
-    "Shaobkj_Grok3_Video": { color: "#0091EA", bgcolor: "#001A2E" },
-    "🤖 Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
-    "🤖 Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 SD_2.0视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 Grok视频": { color: "#0091EA", bgcolor: "#001A2E" },
-    "🎬 Grok-Video-测试": { color: "#0091EA", bgcolor: "#001A2E" },
-    "Shaobkj -Sora视频": { color: "#0091EA", bgcolor: "#001A2E" },
-    "Shaobkj -Veo视频": { color: "#0091EA", bgcolor: "#001A2E" },
+
 
     // ⚡ 极速系列 (效率与工具) - Matrix Green
     "Shaobkj_ConcurrentImageEdit_Sender": { color: "#00C853", bgcolor: "#003311" },
@@ -146,8 +117,9 @@ function getThemeForNode(node) {
     
     // Fallback logic for aliases not explicitly in map but having known keywords
     if (title) {
-        if (title.includes("Sora") || title.includes("Veo") || title.includes("SD_2.0")) return THEME_CONFIG["Shaobkj_Sora_Video"];
-        if (title.includes("反推") || title.includes("编辑")) return THEME_CONFIG["Shaobkj_ConcurrentImageEdit"];
+        if (title.includes("SD_2.0") || title.includes("Grok视频")) return THEME_CONFIG["Shaobkj_SD20_Video"];
+        if (title.includes("反推") || title.includes("编辑")) return THEME_CONFIG["Shaobkj_ConcurrentImageEdit_Sender"];
+
         if (title.includes("图像生成")) return THEME_CONFIG["Shaobkj_APINode"];
         if (title.includes("生图")) return THEME_CONFIG["Shaobkj_APINode"];
         if (title.includes("桥接")) return THEME_CONFIG["Shaobkj_HTTP_Load_Image"];
@@ -295,7 +267,8 @@ function getDynamicInputSpec(node) {
             legacyNames: ["参考图"],
         };
     }
-    if (t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok-Video-测试")))) {
+    if (t === "Shaobkj_Grok_Video" || (typeof title === "string" && title.includes("Grok视频"))) {
+
         return {
             prefix: "参考图",
             slotType: "IMAGE",
@@ -572,7 +545,8 @@ function setupNanoBananaEditingMode(node) {
 function setupGrokVideoDurationMode(node) {
     const t = node?.type || "";
     const title = node?.title || "";
-    if (!(t === "Shaobkj_Grok_Video" || t === "Shaobkj_Grok3_Video" || t === "Shaobkj_Grok3_Video_Generate" || (typeof title === "string" && (title.includes("Grok视频") || title.includes("Grok-Video-测试") || title.includes("shaobkj-grok-3视频生成"))))) {
+    if (!(t === "Shaobkj_Grok_Video" || (typeof title === "string" && title.includes("Grok视频")))) {
+
 
         return false;
     }

@@ -126,5 +126,117 @@
         "type": "gen_batch",
         "image_path": "C:\\Users\\Administrator\\Pictures\\并发输出\\image_15.png",
         "completed_at": 1780986031
+    },
+    "batch_1781946498_7967_0": {
+        "status": "success",
+        "submitted_at": 1781946498,
+        "prompt": "Premium Amazon product image, square 1:1, pure whi...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image.png",
+        "completed_at": 1781946557
+    },
+    "batch_1781946498_7967_1": {
+        "status": "success",
+        "submitted_at": 1781946499,
+        "prompt": "Lifestyle action shot, square 1:1, rugged off road...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_3.png",
+        "completed_at": 1781946570
+    },
+    "batch_1781946498_7967_2": {
+        "status": "success",
+        "submitted_at": 1781946500,
+        "prompt": "Compatibility infographic, square 1:1, white or ve...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_1.png",
+        "completed_at": 1781946565
+    },
+    "batch_1781946498_7967_3": {
+        "status": "success",
+        "submitted_at": 1781946501,
+        "prompt": "Compatibility infographic variant, square 1:1, pre...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_4.png",
+        "completed_at": 1781946573
+    },
+    "batch_1781946498_7967_4": {
+        "status": "success",
+        "submitted_at": 1781946502,
+        "prompt": "Close up durability and anti slip feature image, s...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_2.png",
+        "completed_at": 1781946568
+    },
+    "batch_1781946498_7967_5": {
+        "status": "success",
+        "submitted_at": 1781946557,
+        "prompt": "Protective installed scene, square 1:1, orange Jee...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_5.png",
+        "completed_at": 1781946620
+    },
+    "batch_1781946498_7967_6": {
+        "status": "success",
+        "submitted_at": 1781946565,
+        "prompt": "Dimension and accessories infographic, square 1:1,...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_6.png",
+        "completed_at": 1781946655
+    },
+    "batch_1781947900_7491_0": {
+        "status": "success",
+        "submitted_at": 1781947900,
+        "prompt": "Amazon product main image, pure white background, ...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_7.png",
+        "completed_at": 1781947957
+    },
+    "batch_1781947900_7491_1": {
+        "status": "success",
+        "submitted_at": 1781947901,
+        "prompt": "Outdoor lifestyle installation scene, square 1:1, ...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_11.png",
+        "completed_at": 1781947983
+    },
+    "batch_1781947900_7491_2": {
+        "status": "success",
+        "submitted_at": 1781947902,
+        "prompt": "Compatibility and fitment infographic, square 1:1,...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_8.png",
+        "completed_at": 1781947965
+    },
+    "batch_1781947900_7491_3": {
+        "status": "success",
+        "submitted_at": 1781947903,
+        "prompt": "Compatibility and fitment infographic variant, squ...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_9.png",
+        "completed_at": 1781947975
+    },
+    "batch_1781947900_7491_4": {
+        "status": "success",
+        "submitted_at": 1781947904,
+        "prompt": "Durability and anti slip close up detail page, squ...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_10.png",
+        "completed_at": 1781947976
+    },
+    "batch_1781947900_7491_5": {
+        "status": "success",
+        "submitted_at": 1781947957,
+        "prompt": "Protection and installation scene, square 1:1, Jee...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_12.png",
+        "completed_at": 1781948045
+    },
+    "batch_1781947900_7491_6": {
+        "status": "success",
+        "submitted_at": 1781947965,
+        "prompt": "Dimensions and accessories infographic, square 1:1...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_13.png",
+        "completed_at": 1781948049
     }
 }
