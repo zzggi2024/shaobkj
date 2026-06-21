@@ -22,7 +22,7 @@ const NODE_CONFIGS = {
 	Shaobkj_Media_Reverse_Prompt: { endpoint: "/shaobkj/media_reverse/models", modelWidget: "模型名称", defaults: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"] },
 	Shaobkj_NanoBanana_Prompt: { endpoint: "/shaobkj/llm_test/models", modelWidget: "模型选择", defaults: ["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"] },
 
-	Shaobkj_Grok_Video: { endpoint: "/shaobkj/grok_video/models", modelWidget: "模型", defaults: ["grok-imagine-1.0-video", "grok-imagine-1.0-video-20s", "grok-imagine-1.0-video-30s"] },
+	Shaobkj_Grok_Video: { endpoint: "/shaobkj/grok_video/models", modelWidget: "模型", defaults: ["grok-imagine-video-1.5-preview", "grok-imagine-1.0-video", "grok-imagine-1.0-video-20s", "grok-imagine-1.0-video-30s"] },
 
 
 	Shaobkj_SD20_Video: { endpoint: "/shaobkj/sd20_video/models", modelWidget: "模型", defaults: ["doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"] },
@@ -127,19 +127,35 @@ function getLinkedWidgetValue(node, inputName) {
 	if (!sourceNode) {
 		return "";
 	}
-	for (const widget of sourceNode.widgets || []) {
-		const value = String(widget.value || "").trim();
+	const widgets = sourceNode.widgets || [];
+	const preferredNames = [inputName, "API密钥", "api_key", "API Key", "key", "value", "字符串", "文本"];
+	for (const name of preferredNames) {
+		const widget = widgets.find((item) => item.name === name);
+		const value = String(widget?.value || "").trim();
 		if (value) {
 			return value;
 		}
 	}
+	if (widgets.length === 1) {
+		return String(widgets[0].value || "").trim();
+	}
 	return "";
 }
 
-function getWidgetOrLinkedValue(node, name) {
-	const widgetValue = String(findWidget(node, name)?.value || "").trim();
-	return widgetValue || getLinkedWidgetValue(node, name);
+
+function hasLinkedInput(node, name) {
+	const input = node.inputs?.find((item) => item.name === name);
+	return input?.link != null;
 }
+
+function getWidgetOrLinkedValue(node, name) {
+	const linkedValue = hasLinkedInput(node, name) ? getLinkedWidgetValue(node, name) : "";
+	if (linkedValue) {
+		return linkedValue;
+	}
+	return String(findWidget(node, name)?.value || "").trim();
+}
+
 
 async function fetchModels(node, config, buttonWidget, nodeTypeName) {
 

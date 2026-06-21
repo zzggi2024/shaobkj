@@ -238,5 +238,61 @@
         "type": "gen_batch",
         "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_13.png",
         "completed_at": 1781948049
+    },
+    "batch_1782030325_3909_0": {
+        "status": "success",
+        "submitted_at": 1782030325,
+        "prompt": "Amazon product image set for orange running boards...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_4.jpg",
+        "completed_at": 1782030365
+    },
+    "batch_1782030325_3909_1": {
+        "status": "success",
+        "submitted_at": 1782030326,
+        "prompt": "Amazon product lifestyle installation image for or...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_1.jpg",
+        "completed_at": 1782030359
+    },
+    "batch_1782030325_3909_2": {
+        "status": "success",
+        "submitted_at": 1782030327,
+        "prompt": "Amazon fitment and compatibility infographic for o...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_2.jpg",
+        "completed_at": 1782030359
+    },
+    "batch_1782030325_3909_3": {
+        "status": "success",
+        "submitted_at": 1782030328,
+        "prompt": "Amazon fitment and compatibility infographic for o...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_3.jpg",
+        "completed_at": 1782030360
+    },
+    "batch_1782030325_3909_4": {
+        "status": "success",
+        "submitted_at": 1782030329,
+        "prompt": "Close up detail image of orange running boards for...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image.jpg",
+        "completed_at": 1782030358
+    },
+    "batch_1782030325_3909_5": {
+        "status": "success",
+        "submitted_at": 1782030358,
+        "prompt": "Installed protection and style image for orange ru...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_6.jpg",
+        "completed_at": 1782030391
+    },
+    "batch_1782030325_3909_6": {
+        "status": "success",
+        "submitted_at": 1782030359,
+        "prompt": "Dimension chart image for orange running boards co...",
+        "type": "gen_batch",
+        "image_path": "C:\\Users\\Administrator\\Pictures\\并发测试输出\\image_5.jpg",
+        "completed_at": 1782030388
     }
 }
