@@ -11,12 +11,12 @@ const NODE_CONFIGS = {
 
 	Shaobkj_APINode: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"] },
 	Shaobkj_APINode_Batch: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"] },
-	Shaobkj_GPT2Edits_Node: { endpoint: "/shaobkj/gpt_image/models", modelWidget: "模型选择", defaults: ["gpt-image-2-all"] },
-	Shaobkj_GPTImage2_Batch_Node: { endpoint: "/shaobkj/gpt_image/models", modelWidget: "模型选择", defaults: ["gpt-image-2-all"] },
+	Shaobkj_GPT2Edits_Node: { endpoint: "/shaobkj/gpt_image/models", modelWidget: "模型选择", defaults: ["gpt-image-2", "gpt-image-2-all"] },
+	Shaobkj_GPTImage2_Batch_Node: { endpoint: "/shaobkj/gpt_image/models", modelWidget: "模型选择", defaults: ["gpt-image-2", "gpt-image-2-all"] },
 
-	Shaobkj_ConcurrentImageEdit_Sender: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"] },
-	Shaobkj_GroupedConcurrentImageEdit: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"] },
-	Shaobkj_Doubao_Image: { endpoint: "/shaobkj/doubao_image/models", modelWidget: "模型选择", defaults: ["doubao-seedream-5-0-260128"] },
+	Shaobkj_ConcurrentImageEdit_Sender: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"] },
+	Shaobkj_GroupedConcurrentImageEdit: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"] },
+	Shaobkj_Doubao_Image: { endpoint: "/shaobkj/doubao_image/models", modelWidget: "模型选择", defaults: ["doubao-seedream-5-0-260128", "doubao-seedream-4-0-250828", "doubao-seedream-4-5-251128"] },
 
 	Shaobkj_LLM_App: { endpoint: "/shaobkj/llm_test/models", modelWidget: "模型选择", defaults: ["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview", "gpt-5.4-mini"] },
 	Shaobkj_Media_Reverse_Prompt: { endpoint: "/shaobkj/media_reverse/models", modelWidget: "模型名称", defaults: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"] },
