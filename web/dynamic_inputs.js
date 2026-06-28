@@ -301,22 +301,15 @@ function isShaobkjRuntimeNode(node) {
         return false;
     }
     
-    // Debug logging
     if (t && (SHAOBKJ_NODE_TYPES.includes(t) || DYNAMIC_NODES.includes(t))) {
-        console.log("[Shaobkj Debug] Node matched by type:", t);
         return true;
     }
     if (title && typeof title === "string" && title.toLowerCase().includes("shaobkj")) {
-        console.log("[Shaobkj Debug] Node matched by title:", title);
         return true;
     }
-    
-    // Debug: Log what types we're checking against
-    if (t && !SHAOBKJ_NODE_TYPES.includes(t) && !DYNAMIC_NODES.includes(t)) {
-        console.log("[Shaobkj Debug] Node NOT matched:", t, "SHAOBKJ_NODE_TYPES:", SHAOBKJ_NODE_TYPES, "DYNAMIC_NODES:", DYNAMIC_NODES);
-    }
-    
+
     return false;
+
 }
 
 function isShaobkjLoadImageNode(node) {
@@ -1423,6 +1416,12 @@ function cleanupDynamicInputs(node) {
     }
 }
 
+function isApiApplyWidget(widget) {
+    const name = widget?.name || "";
+    const label = widget?.label || "";
+    return name === "API申请地址" || name === "打开 API 申请地址" || name === "打开API申请地址" || name === "🔗 打开 API 申请地址" || label === "打开 API 申请地址" || label === "打开API申请地址" || label === "🔗 打开 API 申请地址";
+}
+
 function setupLinkWidget(node) {
     if (!node.widgets) {
         node.widgets = [];
@@ -1430,7 +1429,7 @@ function setupLinkWidget(node) {
     const nodeType = node?.type || "";
     const nodeTitle = node?.title || "";
     if (isShaobkjSizePresetNode(node)) {
-        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
             node.setDirtyCanvas(true, true);
@@ -1440,7 +1439,7 @@ function setupLinkWidget(node) {
     }
     if (nodeType === "Shaobkj_ParamExtract" || (typeof nodeTitle === "string" && nodeTitle.includes("参数提取"))) {
 
-        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
             node.setDirtyCanvas(true, true);
@@ -1449,7 +1448,7 @@ function setupLinkWidget(node) {
         return false;
     }
     if (isShaobkjZeroOneFloatNode(node)) {
-        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
             node.setDirtyCanvas(true, true);
@@ -1458,7 +1457,7 @@ function setupLinkWidget(node) {
         return false;
     }
     if (isShaobkjTextProcessNode(node)) {
-        const legacyIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const legacyIndex = node.widgets.findIndex(isApiApplyWidget);
         if (legacyIndex >= 0) {
             node.widgets.splice(legacyIndex, 1);
         }
@@ -1508,7 +1507,7 @@ function setupLinkWidget(node) {
         return true;
     }
     if (isShaobkjLoopTriggerNode(node)) {
-        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
             node.setDirtyCanvas(true, true);
@@ -1517,7 +1516,7 @@ function setupLinkWidget(node) {
         return false;
     }
     if (nodeType === "Shaobkj_FreeColor" || (typeof nodeTitle === "string" && nodeTitle.includes("自由调色"))) {
-        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
             node.setDirtyCanvas(true, true);
@@ -1526,7 +1525,7 @@ function setupLinkWidget(node) {
         return false;
     }
     if (nodeType === "Shaobkj_QuickMark" || (typeof nodeTitle === "string" && nodeTitle.includes("快速标记"))) {
-        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
             node.setDirtyCanvas(true, true);
@@ -1535,7 +1534,7 @@ function setupLinkWidget(node) {
         return false;
     }
     if (nodeType === "Shaobkj_FontStyleSelector" || (typeof nodeTitle === "string" && nodeTitle.includes("字体风格提示词选择器"))) {
-        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
             node.setDirtyCanvas(true, true);
@@ -1544,7 +1543,7 @@ function setupLinkWidget(node) {
         return false;
     }
     if (nodeType === "Shaobkj_CustomVideoSave" || (typeof nodeTitle === "string" && nodeTitle.includes("视频保存-少白科技"))) {
-        const existingIndex = node.widgets.findIndex(w => w.name === "API申请地址");
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
             node.setDirtyCanvas(true, true);
@@ -1552,47 +1551,48 @@ function setupLinkWidget(node) {
         }
         return false;
     }
-    const index = node.widgets.findIndex(w => w.name === "API申请地址");
+    const index = node.widgets.findIndex(isApiApplyWidget);
     const defaultUrl = "https://yhmx.work/login?expired=true";
+    const applyApiLinkButton = (widget) => {
+        widget.name = "API申请地址";
+        widget.label = "🔗 打开 API 申请地址";
+        widget.tooltip = "打开 API 申请页面";
+        widget.callback = () => {
+            window.open(defaultUrl, "_blank");
+        };
+        widget.serialize = false;
+        return widget;
+    };
 
-    // Case 1: Not found - Add it
     if (index === -1) {
         const newWidget = node.addWidget("button", "API申请地址", "Open URL", () => {
             window.open(defaultUrl, "_blank");
         });
-        newWidget.name = "API申请地址";
-        newWidget.label = "🔗 打开 API 申请地址";
-        newWidget.tooltip = "打开 API 申请页面";
-        newWidget.serialize = false;
+        applyApiLinkButton(newWidget);
         node.setDirtyCanvas(true, true);
         return true;
     }
 
-    // Case 2: Found - Check properties and position
     const widget = node.widgets[index];
     const isLast = index === node.widgets.length - 1;
-    const isCorrect = widget.type === "button" && widget.label === "🔗 打开 API 申请地址" && widget.callback;
+    const isCorrect = widget.type === "button" && widget.label === "🔗 打开 API 申请地址";
 
-    // If correct and at the bottom, do nothing
-    if (isCorrect && isLast) {
-        return false;
-    }
-
-    // If correct but not at bottom, move to end
-    if (isCorrect && !isLast) {
+    if (widget.type === "button") {
+        applyApiLinkButton(widget);
+        if (isCorrect && isLast) {
+            return false;
+        }
         node.widgets.splice(index, 1);
         node.widgets.push(widget);
         node.setDirtyCanvas(true, true);
         return true;
     }
 
-    // Case 3: Incorrect properties - Replace and ensure at bottom
-    const urlValue = typeof widget.value === "string" ? widget.value.trim() : "";
-    const url = urlValue && (urlValue.startsWith("http://") || urlValue.startsWith("https://")) ? urlValue : defaultUrl;
     node.widgets.splice(index, 1);
     const newWidget = node.addWidget("button", "API申请地址", "Open URL", () => {
-        window.open(url, "_blank");
+        window.open(defaultUrl, "_blank");
     });
+
 
     newWidget.name = "API申请地址";
     newWidget.label = "🔗 打开 API 申请地址";
@@ -2079,7 +2079,8 @@ app.registerExtension({
         return this.setup(app);
     },
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        const isShaobkjCategory = nodeData?.category && nodeData.category.startsWith("🤖shaobkj-APIbox");
+        const category = nodeData?.category || "";
+        const isShaobkjCategory = category.startsWith("🤖shaobkj-APIbox") || category.startsWith("🤖shaobkj-APlbox");
         const needsDynamicInputs = shouldManageDynamicInputsByNodeData(nodeData);
         if (isShaobkjCategory || needsDynamicInputs) {
             // Apply theme prototype

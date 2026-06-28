@@ -1,6 +1,36 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
+function recursiveAddNodes(nodeId, oldOutput, newOutput) {
+    const currentNode = oldOutput[String(nodeId)];
+    if (!currentNode || newOutput[String(nodeId)] != null) {
+        return;
+    }
+    newOutput[String(nodeId)] = currentNode;
+    for (const inputValue of Object.values(currentNode.inputs || {})) {
+        if (Array.isArray(inputValue)) {
+            recursiveAddNodes(inputValue[0], oldOutput, newOutput);
+        }
+    }
+}
+
+async function queueOnlyCurrentNode(node) {
+    const originalQueuePrompt = api.queuePrompt;
+    api.queuePrompt = async function (index, prompt, ...args) {
+        if (prompt?.output) {
+            const newOutput = {};
+            recursiveAddNodes(node.id, prompt.output, newOutput);
+            prompt.output = newOutput;
+        }
+        return originalQueuePrompt.apply(api, [index, prompt, ...args]);
+    };
+    try {
+        await app.queuePrompt(0);
+    } finally {
+        api.queuePrompt = originalQueuePrompt;
+    }
+}
+
 app.registerExtension({
 	name: "Shaobkj.ConcurrentImageEdit",
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
@@ -39,11 +69,11 @@ app.registerExtension({
                     }
 
                     try {
-                        console.log("[Shaobkj] Queuing prompt...");
-                        await app.queuePrompt(0, 1);
-                        console.log("[Shaobkj] Prompt queued successfully");
+                        console.log("[Shaobkj] Queuing current node only...");
+                        await queueOnlyCurrentNode(this);
+                        console.log("[Shaobkj] Current node queued successfully");
                         
-                        app.ui.dialog.show("🚀 任务已发送至队列...");
+                        app.ui.dialog.show("🚀 当前节点任务已发送...");
                         setTimeout(() => { app.ui.dialog.close(); }, 1000);
                     } catch (error) {
                         console.error("[Shaobkj] Queue prompt failed:", error);

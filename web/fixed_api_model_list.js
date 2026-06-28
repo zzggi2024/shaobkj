@@ -7,15 +7,20 @@ const MODEL_SELECT_WIDGET = "可用模型列表";
 const FIXED_API_BASE = "https://yhmx.work";
 const STORAGE_PREFIX = "Shaobkj.FixedApiModelList";
 
+const GEMINI_IMAGE_MODEL_FILTER = (model) => {
+	const name = String(model || "").toLowerCase();
+	return name.includes("gemini") && (name.includes("image") || name.includes("preview"));
+};
+
 const NODE_CONFIGS = {
 
-	Shaobkj_APINode: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"] },
-	Shaobkj_APINode_Batch: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"] },
+	Shaobkj_APINode: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"], filter: GEMINI_IMAGE_MODEL_FILTER },
+	Shaobkj_APINode_Batch: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"], filter: GEMINI_IMAGE_MODEL_FILTER },
 	Shaobkj_GPT2Edits_Node: { endpoint: "/shaobkj/gpt_image/models", modelWidget: "模型选择", defaults: ["gpt-image-2", "gpt-image-2-all"] },
 	Shaobkj_GPTImage2_Batch_Node: { endpoint: "/shaobkj/gpt_image/models", modelWidget: "模型选择", defaults: ["gpt-image-2", "gpt-image-2-all"] },
 
-	Shaobkj_ConcurrentImageEdit_Sender: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"] },
-	Shaobkj_GroupedConcurrentImageEdit: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"] },
+	Shaobkj_ConcurrentImageEdit_Sender: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"], filter: GEMINI_IMAGE_MODEL_FILTER },
+	Shaobkj_GroupedConcurrentImageEdit: { endpoint: "/shaobkj/test_api/models", modelWidget: "模型选择", defaults: ["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "智能加载"], filter: GEMINI_IMAGE_MODEL_FILTER },
 	Shaobkj_Doubao_Image: { endpoint: "/shaobkj/doubao_image/models", modelWidget: "模型选择", defaults: ["doubao-seedream-5-0-260128", "doubao-seedream-4-0-250828", "doubao-seedream-4-5-251128"] },
 
 	Shaobkj_LLM_App: { endpoint: "/shaobkj/llm_test/models", modelWidget: "模型选择", defaults: ["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview", "gpt-5.4-mini"] },
@@ -101,11 +106,16 @@ function saveStoredModels(nodeTypeName, models) {
 }
 
 
+function filterModels(config, models) {
+	const values = (models || []).filter(Boolean);
+	return config.filter ? values.filter(config.filter) : values;
+}
+
 function setModelOptions(node, config, models, selectedValue) {
 
 	const modelWidget = findWidget(node, config.modelWidget);
 	const selectWidget = findWidget(node, MODEL_SELECT_WIDGET);
-	const options = Array.from(new Set((models || []).filter(Boolean)));
+	const options = Array.from(new Set(filterModels(config, models)));
 	const values = options.length ? options : config.defaults;
 	const currentModel = String(modelWidget?.value || "").trim();
 	const selected = selectedValue || (currentModel && values.includes(currentModel) ? currentModel : values[0]);
@@ -158,8 +168,11 @@ function getWidgetOrLinkedValue(node, name) {
 
 
 async function fetchModels(node, config, buttonWidget, nodeTypeName) {
-
+	if (node.__shaobkjFetchingModels) {
+		return;
+	}
 	const modelWidget = findWidget(node, config.modelWidget);
+
 	const apiKey = getWidgetOrLinkedValue(node, API_KEY_WIDGET);
 	const proxyWidget = findWidget(node, "使用系统代理");
 	const useProxy = proxyWidget ? Boolean(proxyWidget.value) : true;
@@ -175,8 +188,10 @@ async function fetchModels(node, config, buttonWidget, nodeTypeName) {
 	}
 
 	const oldName = buttonWidget.name;
+	node.__shaobkjFetchingModels = true;
 	buttonWidget.name = "正在获取...";
 	node.setDirtyCanvas?.(true, true);
+
 
 	try {
 		const response = await api.fetchApi(config.endpoint, {
@@ -189,21 +204,24 @@ async function fetchModels(node, config, buttonWidget, nodeTypeName) {
 			throw new Error(data?.error || `模型列表获取失败：HTTP ${response.status}`);
 		}
 		const models = Array.isArray(data.models) ? data.models.filter(Boolean) : [];
-		if (!models.length) {
+		const filteredModels = filterModels(config, models);
+		if (!filteredModels.length) {
 			throw new Error("请到后台查看具体错误");
 		}
-		saveStoredModels(nodeTypeName, models);
+		saveStoredModels(nodeTypeName, filteredModels);
 
-		setModelOptions(node, config, models, models[0]);
+		setModelOptions(node, config, filteredModels, filteredModels[0]);
 		showToast("模型更新成功");
 
 	} catch (error) {
 		showToast("请到后台查看具体错误", true);
 		console.warn("[Shaobkj-模型列表]", error);
 	} finally {
+		node.__shaobkjFetchingModels = false;
 		buttonWidget.name = oldName;
 		node.setDirtyCanvas?.(true, true);
 	}
+
 }
 
 function applyStoredModelOptions(node, config, nodeTypeName) {
