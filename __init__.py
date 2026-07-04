@@ -81,8 +81,42 @@ def _configured_instance_id():
 def _device_fingerprint(anchor):
     return _h.sha256(anchor.encode("utf-8", errors="ignore")).hexdigest()[:24]
 def _cloud_device_id(instance_id):
-    digest = _h.sha256(f"SHAOBKJ_CLOUD_DEVICE:{instance_id}".encode("utf-8", errors="ignore")).hexdigest()[:24].upper()
-    return f"SHAOBKJ-CLOUD-{digest}"
+    digest = _h.sha256(f"JDKF_CLOUD_DEVICE_V2:{instance_id}".encode("utf-8", errors="ignore")).hexdigest()[:32].upper()
+    return f"JDKF-CLOUD-{digest}"
+def _sha256_hex(value):
+    return _h.sha256(str(value or "").encode("utf-8", errors="ignore")).hexdigest()
+def _device_id_from_local_anchor(device_anchor, anchor_source):
+    source = str(anchor_source or "")
+    if source.startswith("windows_"):
+        prefix = "WIN"
+    elif source.startswith("macos_") or source.startswith("darwin_"):
+        prefix = "MAC"
+    elif source.startswith("linux_") or source.startswith("dmi_"):
+        prefix = "LIN"
+    elif source and source != "none":
+        prefix = "LIN"
+    else:
+        prefix = "LOC"
+    digest = _sha256_hex(f"JDKF_DEVICE_V2:{device_anchor}")[:32].upper()
+    return f"JDKF-{prefix}-{digest}"
+def _device_display_code(device_id):
+    normalized = "".join(char for char in str(device_id or "").strip().upper() if char.isalnum() or char == "-")
+    if normalized.startswith("JDKF-WIN-"):
+        prefix = "WIN"
+    elif normalized.startswith("JDKF-MAC-"):
+        prefix = "MAC"
+    elif normalized.startswith("JDKF-LIN-"):
+        prefix = "LIN"
+    elif normalized.startswith("JDKF-CLOUD-") or normalized.startswith("SHAOBKJ-CLOUD-"):
+        prefix = "CLO"
+    else:
+        prefix = "LOC"
+    compact = "".join(char for char in normalized if char.isalnum())
+    suffix = compact[-10:]
+    return f"{prefix}-{suffix}" if suffix else ""
+def _is_stable_local_anchor_source(anchor_source):
+    source = str(anchor_source or "")
+    return source.startswith(("windows_", "macos_", "darwin_", "linux_", "dmi_"))
 def _read_text_file(path):
     try:
         return path.read_text(encoding="utf-8", errors="ignore").strip()
@@ -111,6 +145,8 @@ def _clean_anchor_value(value):
     lowered = value.lower()
     if not value or lowered in ('none', 'unknown', 'not specified', 'to be filled by o.e.m.'):
         return ""
+    if lowered in ('00000000-0000-0000-0000-000000000000', 'ffffffff-ffff-ffff-ffff-ffffffffffff'):
+        return ""
     return value
 def _read_dmi_anchor():
     dmi_paths = [
@@ -138,47 +174,49 @@ def _read_command_value(command):
     except Exception:
         return ""
 def _read_windows_anchor():
-    values = []
     try:
         import winreg as _winreg
         with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as key:
             value, _ = _winreg.QueryValueEx(key, "MachineGuid")
             value = _clean_anchor_value(str(value))
             if value:
-                values.append(f"machine_guid={value}")
+                return f"local:windows_machine_guid:{value}", "windows_machine_guid"
     except Exception:
         pass
-    commands = [
-        ("csproduct_uuid", ["wmic", "csproduct", "get", "UUID"]),
-        ("bios_serial", ["wmic", "bios", "get", "SerialNumber"]),
-        ("baseboard_serial", ["wmic", "baseboard", "get", "SerialNumber"]),
-    ]
-    for source, command in commands:
-        value = _clean_anchor_value(_read_command_value(command))
-        if value:
-            values.append(f"{source}={value}")
-    computer_name = _clean_anchor_value(_os.getenv("COMPUTERNAME") or _platform.node())
-    if computer_name:
-        values.append(f"computer_name={computer_name}")
-    if values:
-        return "local:windows:" + "|".join(values), "windows_machine"
+    value = _clean_anchor_value(_read_command_value(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_ComputerSystemProduct).UUID"]))
+    if value:
+        return f"local:windows_smbios_uuid:{value}", "windows_smbios_uuid"
+    value = _clean_anchor_value(_read_command_value(["wmic", "csproduct", "get", "UUID"]))
+    if value:
+        return f"local:windows_smbios_uuid:{value}", "windows_smbios_uuid"
     return "", "none"
+def _read_macos_platform_value(name):
+    output = _read_command_stdout(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
+    marker = f'"{name}"'
+    for line in output.splitlines():
+        if marker not in line or "=" not in line:
+            continue
+        return _clean_anchor_value(line.split("=", 1)[1].strip().strip('"'))
+    return ""
+def _read_command_stdout(command):
+    try:
+        result = _subprocess.run(command, capture_output=True, text=True, timeout=3, shell=False)
+        if result.returncode != 0:
+            return ""
+        return result.stdout or ""
+    except Exception:
+        return ""
 def _read_platform_anchor():
     system_name = (_platform.system() or "").lower()
     if system_name == "windows":
         return _read_windows_anchor()
     if system_name == "darwin":
-        values = []
-        value = _clean_anchor_value(_read_command_value(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"]))
-        if "IOPlatformUUID" in value:
-            value = value.split("IOPlatformUUID", 1)[-1].strip().strip(' ="')
+        value = _read_macos_platform_value("IOPlatformUUID")
         if value:
-            values.append(f"platform_uuid={value}")
-        hostname = _clean_anchor_value(_platform.node())
-        if hostname:
-            values.append(f"hostname={hostname}")
-        if values:
-            return "local:darwin:" + "|".join(values), "darwin_machine"
+            return f"local:macos_ioplatform_uuid:{value}", "macos_ioplatform_uuid"
+        value = _read_macos_platform_value("IOPlatformSerialNumber")
+        if value:
+            return f"local:macos_platform_serial:{value}", "macos_platform_serial"
     return "", "none"
 def _read_container_anchor():
     cgroup = _read_text_file(_P("/proc/self/cgroup"))
@@ -204,10 +242,10 @@ def _current_device_anchor():
     dmi_anchor, dmi_source = _read_dmi_anchor()
     if dmi_anchor:
         return dmi_anchor, dmi_source
+    fallback_values = []
     container_anchor, container_source = _read_container_anchor()
     if container_anchor:
-        return container_anchor, container_source
-    fallback_values = []
+        fallback_values.append(f"{container_source}={container_anchor}")
     hostname = _clean_anchor_value(_platform.node() or _os.getenv("HOSTNAME"))
     if hostname:
         fallback_values.append(f"hostname={hostname}")
@@ -258,16 +296,16 @@ def _save_fallback_device_id(payload):
 def _local_device_id(fingerprint):
     cached = _load_fallback_device_id()
     device_id = str(cached.get("device_id") or "").strip()
-    if device_id:
+    if device_id.startswith("JDKF-LOC-"):
         return device_id
-    device_id = f"RELEASE-{_SAFE_PLUGIN_NAME}-{_secrets.token_hex(16).upper()}"
+    device_id = f"JDKF-LOC-{_secrets.token_hex(16).upper()}"
     _save_fallback_device_id({"device_id": device_id, "fingerprint": fingerprint})
     return device_id
 def _device_response_payload(device_identity):
     device_id = device_identity.get("device_id") or ""
     return {
         "device_id": device_id,
-        "device_code": ((device_identity.get("instance_id") or device_id[-12:]) or "").upper(),
+        "device_code": _device_display_code(device_id),
         "device_anchor_source": device_identity.get("device_anchor_source") or "none",
         "device_type": device_identity.get("device_type") or "local",
         "instance_id": device_identity.get("instance_id") or "",
@@ -279,6 +317,11 @@ def _device_payload():
     instance_id = _configured_instance_id()
     if instance_id:
         payload = {"device_id": _cloud_device_id(instance_id), "device_type": "cloud", "instance_id": instance_id, "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": True}
+        _write_device_config(payload)
+        return _device_response_payload(payload)
+    if current_anchor and _is_stable_local_anchor_source(anchor_source):
+        device_id = _device_id_from_local_anchor(current_anchor, anchor_source)
+        payload = {"device_id": device_id, "device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()}
         _write_device_config(payload)
         return _device_response_payload(payload)
     try:
