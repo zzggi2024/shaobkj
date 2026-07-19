@@ -31,6 +31,7 @@ const NODE_CONFIGS = {
 
 
 	Shaobkj_SD20_Video: { endpoint: "/shaobkj/sd20_video/models", modelWidget: "模型", defaults: ["doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"] },
+	Shaobkj_Seedance_Video: { endpoint: "/shaobkj/sd20_video/models", modelWidget: "模型", defaults: ["seedance-2.0-standard-t2v", "seedance-2.0-fast-t2v", "seedance-2.0-mini-t2v", "seedance-2.0-standard-i2v", "seedance-2.0-fast-i2v", "seedance-2.0-mini-i2v", "seedance-2.0-standard-multi", "seedance-2.0-fast-multi", "seedance-2.0-mini-multi", "seedance-2.0-global-standard-t2v", "seedance-2.0-global-fast-t2v", "seedance-2.0-global-mini-t2v", "seedance-2.0-global-standard-i2v", "seedance-2.0-global-fast-i2v", "seedance-2.0-global-mini-i2v", "seedance-2.0-global-standard-multi", "seedance-2.0-global-fast-multi", "seedance-2.0-global-mini-multi"] },
 
 };
 

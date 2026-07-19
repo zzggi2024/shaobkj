@@ -14,6 +14,7 @@ import time as _time
 import ctypes as _ctypes
 import urllib.request as _ur
 import urllib.error as _ue
+import uuid as _uuid
 import zlib as _z
 from pathlib import Path as _P
 _MAGIC = b"SBGHPUB2"
@@ -26,6 +27,10 @@ _PLUGIN_DIR = _P(__file__).resolve().parent
 _AUTH_FILE = _PLUGIN_DIR / ".auth_ok"
 _DEVICE_FILE = _PLUGIN_DIR / "device.json"
 _AUTH_CHECK_INTERVAL_SECONDS = 86400
+_DEVICE_ANCHOR_DISCOVERY_TIMEOUT_SECONDS = 3.0
+_DEVICE_ANCHOR_MAX_ATTEMPTS = 3
+_DEVICE_ANCHOR_ATTEMPT_TIMEOUTS = (1.5, 0.75, 0.25)
+_DEVICE_ANCHOR_RETRY_DELAYS = (0.2, 0.3)
 _AUTH_ROUTE_PREFIX = f"/{_SAFE_PLUGIN_NAME}/auth"
 def _rotl32(value, shift):
     return ((value << shift) & 0xFFFFFFFF) | (value >> (32 - shift))
@@ -143,118 +148,159 @@ def _is_cloud_runtime():
 def _clean_anchor_value(value):
     value = (value or "").strip().strip("\x00")
     lowered = value.lower()
-    if not value or lowered in ('none', 'unknown', 'not specified', 'to be filled by o.e.m.'):
+    if not value or lowered in {
+        "none",
+        "unknown",
+        "not specified",
+        "to be filled by o.e.m.",
+        "default string",
+        "system serial number",
+        "not applicable",
+        "n/a",
+    }:
         return ""
-    if lowered in ('00000000-0000-0000-0000-000000000000', 'ffffffff-ffff-ffff-ffff-ffffffffffff'):
+    if lowered in {"00000000-0000-0000-0000-000000000000", "ffffffff-ffff-ffff-ffff-ffffffffffff"}:
         return ""
     return value
-def _read_dmi_anchor():
-    dmi_paths = [
-        ("dmi_machine_id", _P("/etc/machine-id")),
-        ("dmi_product_uuid", _P("/sys/class/dmi/id/product_uuid")),
-        ("dmi_product_serial", _P("/sys/class/dmi/id/product_serial")),
-        ("dmi_board_serial", _P("/sys/class/dmi/id/board_serial")),
-    ]
-    values = []
-    for source, path in dmi_paths:
-        value = _clean_anchor_value(_read_text_file(path))
-        if value:
-            values.append(f"{source}={value}")
-    if values:
-        return "local:linux:" + "|".join(values), "linux_machine"
-    return "", "none"
-def _read_command_value(command):
+def _clean_uuid_anchor_value(value):
+    value = _clean_anchor_value(value)
+    if not value:
+        return ""
     try:
-        result = _subprocess.run(command, capture_output=True, text=True, timeout=3, shell=False)
-        if result.returncode != 0:
-            return ""
-        lines = [_clean_anchor_value(line) for line in (result.stdout or "").splitlines()]
-        lines = [line for line in lines if line and not line.lower().startswith(("uuid", "serialnumber", "identifyingnumber"))]
-        return lines[0] if lines else ""
+        _uuid.UUID(value)
     except Exception:
         return ""
-def _read_windows_anchor():
+    return value
+def _read_command_stdout(command, deadline=None):
+    timeout = 3.0
+    if deadline is not None:
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            return ""
+        timeout = min(timeout, max(0.1, remaining))
     try:
-        import winreg as _winreg
-        with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as key:
-            value, _ = _winreg.QueryValueEx(key, "MachineGuid")
-            value = _clean_anchor_value(str(value))
-            if value:
-                return f"local:windows_machine_guid:{value}", "windows_machine_guid"
-    except Exception:
-        pass
-    value = _clean_anchor_value(_read_command_value(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_ComputerSystemProduct).UUID"]))
-    if value:
-        return f"local:windows_smbios_uuid:{value}", "windows_smbios_uuid"
-    value = _clean_anchor_value(_read_command_value(["wmic", "csproduct", "get", "UUID"]))
-    if value:
-        return f"local:windows_smbios_uuid:{value}", "windows_smbios_uuid"
-    return "", "none"
-def _read_macos_platform_value(name):
-    output = _read_command_stdout(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"])
-    marker = f'"{name}"'
-    for line in output.splitlines():
-        if marker not in line or "=" not in line:
-            continue
-        return _clean_anchor_value(line.split("=", 1)[1].strip().strip('"'))
-    return ""
-def _read_command_stdout(command):
-    try:
-        result = _subprocess.run(command, capture_output=True, text=True, timeout=3, shell=False)
+        result = _subprocess.run(command, capture_output=True, text=True, timeout=timeout, shell=False)
         if result.returncode != 0:
             return ""
         return result.stdout or ""
     except Exception:
         return ""
-def _read_platform_anchor():
+def _read_command_uuid(command, deadline=None):
+    lines = [_clean_uuid_anchor_value(line) for line in _read_command_stdout(command, deadline).splitlines()]
+    lines = [line for line in lines if line]
+    return lines[0] if lines else ""
+def _read_windows_machine_guid():
+    try:
+        import winreg as _winreg
+        with _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as key:
+            value, _ = _winreg.QueryValueEx(key, "MachineGuid")
+        return _clean_uuid_anchor_value(str(value))
+    except Exception:
+        return ""
+def _read_windows_smbios_uuid(deadline=None):
+    value = _read_command_uuid(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_ComputerSystemProduct).UUID"], deadline)
+    if value:
+        return value
+    return _read_command_uuid(["wmic", "csproduct", "get", "UUID"], deadline)
+def _read_windows_anchors(deadline=None):
+    machine_guid = _read_windows_machine_guid()
+    smbios_uuid = _read_windows_smbios_uuid(deadline)
+    anchors = []
+    if smbios_uuid:
+        anchors.append((f"local:windows_smbios_uuid:{smbios_uuid}", "windows_smbios_uuid"))
+    if machine_guid:
+        anchors.append((f"local:windows_machine_guid:{machine_guid}", "windows_machine_guid"))
+    return anchors
+def _read_macos_platform_values(deadline=None):
+    output = _read_command_stdout(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], deadline)
+    values = {}
+    for line in output.splitlines():
+        if "=" not in line:
+            continue
+        raw_value = line.split("=", 1)[1].strip().strip('"')
+        for name in ("IOPlatformUUID", "IOPlatformSerialNumber"):
+            if f'"{name}"' not in line:
+                continue
+            value = _clean_uuid_anchor_value(raw_value) if name == "IOPlatformUUID" else _clean_anchor_value(raw_value)
+            if value:
+                values[name] = value
+            break
+    return values
+def _read_macos_anchors(deadline=None):
+    values = _read_macos_platform_values(deadline)
+    anchors = []
+    if values.get("IOPlatformUUID"):
+        anchors.append((f"local:macos_ioplatform_uuid:{values['IOPlatformUUID']}", "macos_ioplatform_uuid"))
+    if values.get("IOPlatformSerialNumber"):
+        anchors.append((f"local:macos_platform_serial:{values['IOPlatformSerialNumber']}", "macos_platform_serial"))
+    return anchors
+def _read_dmi_anchors():
+    dmi_paths = [
+        ("dmi_product_uuid", _P("/sys/class/dmi/id/product_uuid")),
+        ("dmi_product_serial", _P("/sys/class/dmi/id/product_serial")),
+        ("dmi_board_serial", _P("/sys/class/dmi/id/board_serial")),
+    ]
+    anchors = []
+    for source, path in dmi_paths:
+        value = _clean_anchor_value(_read_text_file(path))
+        if value:
+            anchors.append((f"local:{source}:{value}", source))
+    return anchors
+def _read_device_anchors_once(deadline=None):
     system_name = (_platform.system() or "").lower()
     if system_name == "windows":
-        return _read_windows_anchor()
+        return _read_windows_anchors(deadline)
     if system_name == "darwin":
-        value = _read_macos_platform_value("IOPlatformUUID")
-        if value:
-            return f"local:macos_ioplatform_uuid:{value}", "macos_ioplatform_uuid"
-        value = _read_macos_platform_value("IOPlatformSerialNumber")
-        if value:
-            return f"local:macos_platform_serial:{value}", "macos_platform_serial"
-    return "", "none"
-def _read_container_anchor():
-    cgroup = _read_text_file(_P("/proc/self/cgroup"))
-    for raw_line in cgroup.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        tail = line.rsplit("/", 1)[-1].strip()
-        tail = tail.removeprefix("docker-").removesuffix(".scope")
-        if len(tail) >= 12 and all(char.isalnum() or char in "_.-" for char in tail):
-            return f"local:container_id:{tail}", "container_id"
-    hostname = _clean_anchor_value(_os.getenv("HOSTNAME") or _read_text_file(_P("/etc/hostname")))
-    if hostname:
-        return f"local:hostname:{hostname}", "hostname"
-    return "", "none"
+        return _read_macos_anchors(deadline)
+    return _read_dmi_anchors()
+def _preferred_anchor_source():
+    system_name = (_platform.system() or "").lower()
+    if system_name == "windows":
+        return "windows_smbios_uuid"
+    if system_name == "darwin":
+        return "macos_ioplatform_uuid"
+    return "dmi_product_uuid"
+def _anchor_source_priority(source):
+    priorities = {
+        "windows_smbios_uuid": 0,
+        "windows_machine_guid": 1,
+        "macos_ioplatform_uuid": 0,
+        "macos_platform_serial": 1,
+        "dmi_product_uuid": 0,
+        "dmi_product_serial": 1,
+        "dmi_board_serial": 2,
+    }
+    return priorities.get(source, 99)
+def _discover_device_anchors():
+    deadline = _time.monotonic() + _DEVICE_ANCHOR_DISCOVERY_TIMEOUT_SECONDS
+    discovered = {}
+    preferred_source = _preferred_anchor_source()
+    for attempt in range(_DEVICE_ANCHOR_MAX_ATTEMPTS):
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            break
+        attempt_timeout = _DEVICE_ANCHOR_ATTEMPT_TIMEOUTS[min(attempt, len(_DEVICE_ANCHOR_ATTEMPT_TIMEOUTS) - 1)]
+        attempt_deadline = min(deadline, _time.monotonic() + attempt_timeout)
+        for anchor, source in _read_device_anchors_once(attempt_deadline):
+            if anchor and source and source != "none":
+                discovered[source] = anchor
+        if preferred_source in discovered or attempt >= _DEVICE_ANCHOR_MAX_ATTEMPTS - 1:
+            break
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            break
+        delay = _DEVICE_ANCHOR_RETRY_DELAYS[min(attempt, len(_DEVICE_ANCHOR_RETRY_DELAYS) - 1)]
+        _time.sleep(min(delay, remaining))
+    return sorted(
+        ((anchor, source) for source, anchor in discovered.items()),
+        key=lambda item: _anchor_source_priority(item[1]),
+    )
 def _current_device_anchor():
     instance_id = _configured_instance_id()
     if instance_id:
         return f"cloud:{instance_id}", "cloud_instance_id"
-    platform_anchor, platform_source = _read_platform_anchor()
-    if platform_anchor:
-        return platform_anchor, platform_source
-    dmi_anchor, dmi_source = _read_dmi_anchor()
-    if dmi_anchor:
-        return dmi_anchor, dmi_source
-    fallback_values = []
-    container_anchor, container_source = _read_container_anchor()
-    if container_anchor:
-        fallback_values.append(f"{container_source}={container_anchor}")
-    hostname = _clean_anchor_value(_platform.node() or _os.getenv("HOSTNAME"))
-    if hostname:
-        fallback_values.append(f"hostname={hostname}")
-    user_name = _clean_anchor_value(_os.getenv("USERNAME") or _os.getenv("USER"))
-    if user_name:
-        fallback_values.append(f"user={user_name}")
-    if fallback_values:
-        return "local:fallback:" + "|".join(fallback_values), "fallback_machine"
-    return "", "none"
+    anchors = _discover_device_anchors()
+    return anchors[0] if anchors else ("", "none")
 def _set_hidden_file(path):
     try:
         if _platform.system().lower() == "windows":
@@ -301,6 +347,31 @@ def _local_device_id(fingerprint):
     device_id = f"JDKF-LOC-{_secrets.token_hex(16).upper()}"
     _save_fallback_device_id({"device_id": device_id, "fingerprint": fingerprint})
     return device_id
+def _read_device_config():
+    try:
+        if _DEVICE_FILE.is_file():
+            payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+    except Exception:
+        pass
+    return _load_fallback_device_id()
+def _device_anchor_fingerprints(anchors):
+    return {source: _device_fingerprint(anchor) for anchor, source in anchors if anchor and source != "none"}
+def _saved_anchor_fingerprints(payload):
+    saved = payload.get("device_anchor_fingerprints")
+    fingerprints = {
+        str(source): str(fingerprint)
+        for source, fingerprint in saved.items()
+        if source and fingerprint
+    } if isinstance(saved, dict) else {}
+    source = str(payload.get("device_anchor_source") or "").strip()
+    fingerprint = str(payload.get("device_fingerprint") or "").strip()
+    if source and fingerprint:
+        fingerprints.setdefault(source, fingerprint)
+    return fingerprints
+def _is_stable_local_device_id(device_id):
+    normalized = str(device_id or "").strip().upper()
+    return normalized.startswith(("JDKF-WIN-", "JDKF-MAC-", "JDKF-LIN-"))
 def _device_response_payload(device_identity):
     device_id = device_identity.get("device_id") or ""
     return {
@@ -312,29 +383,83 @@ def _device_response_payload(device_identity):
         "cloud_runtime": bool(device_identity.get("cloud_runtime")),
     }
 def _device_payload():
-    current_anchor, anchor_source = _current_device_anchor()
-    current_fingerprint = _device_fingerprint(current_anchor) if current_anchor else ""
     instance_id = _configured_instance_id()
     if instance_id:
+        current_anchor = f"cloud:{instance_id}"
+        anchor_source = "cloud_instance_id"
+        current_fingerprint = _device_fingerprint(current_anchor)
         payload = {"device_id": _cloud_device_id(instance_id), "device_type": "cloud", "instance_id": instance_id, "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": True}
         _write_device_config(payload)
         return _device_response_payload(payload)
-    if current_anchor and _is_stable_local_anchor_source(anchor_source):
-        device_id = _device_id_from_local_anchor(current_anchor, anchor_source)
-        payload = {"device_id": device_id, "device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()}
+
+    saved_payload = _read_device_config()
+    stored_device_id = str(saved_payload.get("device_id") or "").strip()
+    anchors = _discover_device_anchors()
+    current_fingerprints = _device_anchor_fingerprints(anchors)
+
+    if not anchors:
+        if stored_device_id:
+            payload = {
+                **saved_payload,
+                "device_id": stored_device_id,
+                "device_type": "local",
+                "instance_id": "",
+                "device_anchor_source": "stored_only",
+                "cloud_runtime": _is_cloud_runtime(),
+            }
+            return _device_response_payload(payload)
+        device_id = _local_device_id("")
+        payload = {"device_id": device_id, "device_type": "local", "instance_id": "", "device_anchor_source": "none", "cloud_runtime": _is_cloud_runtime()}
         _write_device_config(payload)
         return _device_response_payload(payload)
-    try:
-        payload = _json.loads(_DEVICE_FILE.read_text(encoding="utf-8")) if _DEVICE_FILE.is_file() else {}
-        device_id = str(payload.get("device_id") or "").strip()
-        saved_fingerprint = str(payload.get("device_fingerprint") or "").strip()
-        if device_id and saved_fingerprint and saved_fingerprint == current_fingerprint:
-            payload.update({"device_type": "local", "instance_id": "", "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()})
+
+    current_anchor, anchor_source = anchors[0]
+    current_fingerprint = current_fingerprints[anchor_source]
+
+    if stored_device_id and _is_stable_local_device_id(stored_device_id):
+        saved_fingerprints = _saved_anchor_fingerprints(saved_payload)
+        matching_source = next(
+            (source for source, fingerprint in current_fingerprints.items() if saved_fingerprints.get(source) == fingerprint),
+            "",
+        )
+        saved_source = str(saved_payload.get("device_anchor_source") or "").strip()
+        generated_ids = {_device_id_from_local_anchor(anchor, source) for anchor, source in anchors}
+        if matching_source or stored_device_id in generated_ids or not saved_fingerprints:
+            payload = {
+                "device_id": stored_device_id,
+                "device_id_version": 2,
+                "device_type": "local",
+                "instance_id": "",
+                "device_fingerprint": current_fingerprint,
+                "device_anchor_source": anchor_source,
+                "device_anchor_fingerprints": {**saved_fingerprints, **current_fingerprints},
+                "cloud_runtime": _is_cloud_runtime(),
+            }
+            _write_device_config(payload)
             return _device_response_payload(payload)
-    except Exception:
-        pass
-    device_id = _local_device_id(current_fingerprint)
-    payload = {"device_id": device_id, "device_type": "local", "instance_id": "", "device_fingerprint": current_fingerprint, "device_anchor_source": anchor_source, "cloud_runtime": _is_cloud_runtime()}
+
+        if saved_source and saved_source not in current_fingerprints:
+            payload = {
+                **saved_payload,
+                "device_id": stored_device_id,
+                "device_type": "local",
+                "instance_id": "",
+                "device_anchor_source": "stored_only",
+                "cloud_runtime": _is_cloud_runtime(),
+            }
+            return _device_response_payload(payload)
+
+    device_id = _device_id_from_local_anchor(current_anchor, anchor_source)
+    payload = {
+        "device_id": device_id,
+        "device_id_version": 2,
+        "device_type": "local",
+        "instance_id": "",
+        "device_fingerprint": current_fingerprint,
+        "device_anchor_source": anchor_source,
+        "device_anchor_fingerprints": current_fingerprints,
+        "cloud_runtime": _is_cloud_runtime(),
+    }
     _write_device_config(payload)
     return _device_response_payload(payload)
 def _remote_validate(access_key):
@@ -351,6 +476,9 @@ def _remote_validate(access_key):
 def _clear_auth():
     try: _AUTH_FILE.unlink()
     except Exception: pass
+def _same_device_identity(saved_device, current_device):
+    keys = ("device_id", "device_type", "instance_id")
+    return all(str(saved_device.get(key) or "") == str(current_device.get(key) or "") for key in keys)
 def _is_authorized():
     try:
         payload = _json.loads(_AUTH_FILE.read_text(encoding="utf-8"))
@@ -360,7 +488,7 @@ def _is_authorized():
     saved_device = payload.get("device") or {}
     current_device = _device_payload()
     validated_at = float(payload.get("validated_at") or 0)
-    if payload.get("ok") is not True or payload.get("auth_scope") != _AUTH_SCOPE or saved_device != current_device:
+    if payload.get("ok") is not True or payload.get("auth_scope") != _AUTH_SCOPE or not _same_device_identity(saved_device, current_device):
         _clear_auth()
         return False
     if _time.time() - validated_at < _AUTH_CHECK_INTERVAL_SECONDS:
@@ -390,8 +518,10 @@ def _set_configured_instance_id(instance_id):
         payload = {}
     payload["instance_id"] = normalized
     payload.pop("device_id", None)
+    payload.pop("device_id_version", None)
     payload.pop("device_fingerprint", None)
     payload.pop("device_anchor_source", None)
+    payload.pop("device_anchor_fingerprints", None)
     _write_device_config(payload)
     return _device_payload()
 def _register_auth_routes():

@@ -7,9 +7,11 @@ const DYNAMIC_NODES = [
     "Shaobkj_GPT2Edits_Node",
     "🖼️ gpt-2-Edits",
     "Shaobkj_SD20_Video",
+    "Shaobkj_Seedance_Video",
     "Shaobkj_Grok_Video",
     "Shaobkj_Doubao_Image",
     "🎬 SD_2.0视频",
+    "seedance视频生成",
     "🎬 Grok视频",
     "🎨 豆包图像生成",
     "Shaobkj_ConcurrentImageEdit_Sender",
@@ -42,6 +44,7 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_GPTImage2_Batch_Node",
     "Shaobkj_GPT2Edits_Node",
     "Shaobkj_SD20_Video",
+    "Shaobkj_Seedance_Video",
     "Shaobkj_Grok_Video",
     "Shaobkj_Doubao_Image",
     "Shaobkj_ConcurrentImageEdit_Sender",
@@ -93,8 +96,10 @@ const THEME_CONFIG = {
 
     // 🎬 导演系列 (视频生成) - Future Blue
     "Shaobkj_SD20_Video": { color: "#0091EA", bgcolor: "#001A2E" },
+    "Shaobkj_Seedance_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj_Grok_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 SD_2.0视频": { color: "#0091EA", bgcolor: "#001A2E" },
+    "seedance视频生成": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 Grok视频": { color: "#0091EA", bgcolor: "#001A2E" },
 
 
@@ -120,7 +125,7 @@ function getThemeForNode(node) {
     
     // Fallback logic for aliases not explicitly in map but having known keywords
     if (title) {
-        if (title.includes("SD_2.0") || title.includes("Grok视频")) return THEME_CONFIG["Shaobkj_SD20_Video"];
+        if (title.includes("SD_2.0") || title.includes("seedance视频生成") || title.includes("Grok视频")) return THEME_CONFIG["Shaobkj_SD20_Video"];
         if (title.includes("反推") || title.includes("编辑")) return THEME_CONFIG["Shaobkj_ConcurrentImageEdit_Sender"];
 
         if (title.includes("图像生成")) return THEME_CONFIG["Shaobkj_APINode"];
@@ -260,7 +265,7 @@ function getDynamicInputSpec(node) {
             minInputs: 2,
         };
     }
-    if (t === "Shaobkj_SD20_Video" || (typeof title === "string" && title.includes("SD_2.0视频"))) {
+    if (t === "Shaobkj_SD20_Video" || t === "Shaobkj_Seedance_Video" || (typeof title === "string" && (title.includes("SD_2.0视频") || title.includes("seedance视频生成")))) {
         return {
             prefix: "参考图",
             slotType: "IMAGE",
@@ -1166,7 +1171,7 @@ function manageGpt2EditsPairedInputs(node, onlyAdd = false) {
 function manageSd20MultiInputs(node, onlyAdd = false) {
     const nodeType = node?.type || "";
     const nodeTitle = node?.title || "";
-    const isSd20Node = nodeType === "Shaobkj_SD20_Video" || (typeof nodeTitle === "string" && nodeTitle.includes("SD_2.0视频"));
+    const isSd20Node = nodeType === "Shaobkj_SD20_Video" || nodeType === "Shaobkj_Seedance_Video" || (typeof nodeTitle === "string" && (nodeTitle.includes("SD_2.0视频") || nodeTitle.includes("seedance视频生成")));
     if (!isSd20Node) {
         return false;
     }
@@ -1680,7 +1685,7 @@ function setupNodeStyle(node) {
 function isSd20Node(node) {
     const nodeType = node?.type || "";
     const nodeTitle = node?.title || "";
-    return nodeType === "Shaobkj_SD20_Video" || (typeof nodeTitle === "string" && nodeTitle.includes("SD_2.0视频"));
+    return nodeType === "Shaobkj_SD20_Video" || nodeType === "Shaobkj_Seedance_Video" || (typeof nodeTitle === "string" && (nodeTitle.includes("SD_2.0视频") || nodeTitle.includes("seedance视频生成")));
 }
 
 function findWidget(node, name) {
