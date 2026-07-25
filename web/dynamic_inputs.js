@@ -64,6 +64,29 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_MaskRecognition",
 ];
 
+// 保留现有节点的既有按钮状态；新增节点仅在用户明确要求后加入此列表。
+const API_APPLY_LINK_NODE_TYPES = new Set([
+    ...SHAOBKJ_NODE_TYPES,
+    "Shaobkj_ForLoop_Start",
+    "Shaobkj_ForLoop_End",
+    "Shaobkj_Loop_Trigger",
+    "Shaobkj_ResolutionJudge",
+    "Shaobkj_GetEdgeLength",
+    "Shaobkj_Load_Florence2_Model",
+    "Shaobkj_Florence2_Fast_Prompt",
+    "Shaobkj_FreeColor",
+    "Shaobkj_QuickMark",
+    "Shaobkj_FontStyleSelector",
+    "Shaobkj_CustomVideoSave",
+    "Shaobkj_SmartVideoSplit",
+    "Shaobkj_SmartVideoJoin",
+    "Shaobkj_ParamExtract",
+    "Shaobkj_SizePreset",
+    "Shaobkj_BatchInput",
+    "Shaobkj_BatchOutput",
+    "Shaobkj_RatioExpandMask",
+]);
+
 const MIN_INPUTS = 2;
 let started = false;
 const LONG_SIDE_WIDGET_NAME = "长边设置";
@@ -1559,6 +1582,15 @@ function setupLinkWidget(node) {
         return false;
     }
     if (nodeType === "Shaobkj_CustomVideoSave" || (typeof nodeTitle === "string" && nodeTitle.includes("视频保存-少白科技"))) {
+        const existingIndex = node.widgets.findIndex(isApiApplyWidget);
+        if (existingIndex >= 0) {
+            node.widgets.splice(existingIndex, 1);
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
+        return false;
+    }
+    if (!API_APPLY_LINK_NODE_TYPES.has(nodeType)) {
         const existingIndex = node.widgets.findIndex(isApiApplyWidget);
         if (existingIndex >= 0) {
             node.widgets.splice(existingIndex, 1);
