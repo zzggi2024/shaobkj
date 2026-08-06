@@ -1600,7 +1600,7 @@ function setupLinkWidget(node) {
         return false;
     }
     const index = node.widgets.findIndex(isApiApplyWidget);
-    const defaultUrl = "https://yhmx.work/login?expired=true";
+    const defaultUrl = "https://yhmx.work";
     const applyApiLinkButton = (widget) => {
         widget.name = "API申请地址";
         widget.label = "🔗 打开 API 申请地址";
