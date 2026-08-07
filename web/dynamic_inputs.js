@@ -86,6 +86,16 @@ const API_APPLY_LINK_NODE_TYPES = new Set([
     "Shaobkj_BatchOutput",
     "Shaobkj_RatioExpandMask",
 ]);
+const API_APPLY_LINK_URL = "https://yhmx.work";
+const API_APPLY_LINK_LABEL = "打开API申请地址";
+const API_APPLY_LINK_WIDGET_NAMES = new Set([
+    "API申请地址",
+    "打开 API 申请地址",
+    "打开API申请地址",
+    "🔗 打开 API 申请地址",
+    "🔗 打开API申请地址",
+    "打开当前 API 地址",
+]);
 
 const MIN_INPUTS = 2;
 let started = false;
@@ -1458,7 +1468,41 @@ function cleanupDynamicInputs(node) {
 function isApiApplyWidget(widget) {
     const name = widget?.name || "";
     const label = widget?.label || "";
-    return name === "API申请地址" || name === "打开 API 申请地址" || name === "打开API申请地址" || name === "🔗 打开 API 申请地址" || label === "打开 API 申请地址" || label === "打开API申请地址" || label === "🔗 打开 API 申请地址";
+    return API_APPLY_LINK_WIDGET_NAMES.has(name) || API_APPLY_LINK_WIDGET_NAMES.has(label);
+}
+
+function openApiApplyLink() {
+    window.open(API_APPLY_LINK_URL, "_blank");
+}
+
+function lockApiApplyWidget(widget) {
+    if (widget.__shaobkjApiApplyLinkLocked) {
+        return;
+    }
+    Object.defineProperties(widget, {
+        callback: {
+            configurable: true,
+            enumerable: true,
+            get: () => openApiApplyLink,
+            set: () => {},
+        },
+        label: {
+            configurable: true,
+            enumerable: true,
+            get: () => API_APPLY_LINK_LABEL,
+            set: () => {},
+        },
+        tooltip: {
+            configurable: true,
+            enumerable: true,
+            get: () => "打开 API 申请页面",
+            set: () => {},
+        },
+    });
+    Object.defineProperty(widget, "__shaobkjApiApplyLinkLocked", {
+        value: true,
+        enumerable: false,
+    });
 }
 
 function setupLinkWidget(node) {
@@ -1600,22 +1644,18 @@ function setupLinkWidget(node) {
         return false;
     }
     const index = node.widgets.findIndex(isApiApplyWidget);
-    const defaultUrl = "https://yhmx.work";
     const applyApiLinkButton = (widget) => {
         widget.name = "API申请地址";
-        widget.label = "🔗 打开 API 申请地址";
+        lockApiApplyWidget(widget);
+        widget.label = API_APPLY_LINK_LABEL;
         widget.tooltip = "打开 API 申请页面";
-        widget.callback = () => {
-            window.open(defaultUrl, "_blank");
-        };
+        widget.callback = openApiApplyLink;
         widget.serialize = false;
         return widget;
     };
 
     if (index === -1) {
-        const newWidget = node.addWidget("button", "API申请地址", "Open URL", () => {
-            window.open(defaultUrl, "_blank");
-        });
+        const newWidget = node.addWidget("button", "API申请地址", "Open URL", openApiApplyLink);
         applyApiLinkButton(newWidget);
         node.setDirtyCanvas(true, true);
         return true;
@@ -1623,7 +1663,7 @@ function setupLinkWidget(node) {
 
     const widget = node.widgets[index];
     const isLast = index === node.widgets.length - 1;
-    const isCorrect = widget.type === "button" && widget.label === "🔗 打开 API 申请地址";
+    const isCorrect = widget.type === "button" && widget.label === API_APPLY_LINK_LABEL;
 
     if (widget.type === "button") {
         applyApiLinkButton(widget);
@@ -1637,15 +1677,10 @@ function setupLinkWidget(node) {
     }
 
     node.widgets.splice(index, 1);
-    const newWidget = node.addWidget("button", "API申请地址", "Open URL", () => {
-        window.open(defaultUrl, "_blank");
-    });
+    const newWidget = node.addWidget("button", "API申请地址", "Open URL", openApiApplyLink);
 
 
-    newWidget.name = "API申请地址";
-    newWidget.label = "🔗 打开 API 申请地址";
-    newWidget.tooltip = "打开 API 申请页面";
-    newWidget.serialize = false;
+    applyApiLinkButton(newWidget);
 
     node.setDirtyCanvas(true, true);
     return true;
@@ -2016,15 +2051,15 @@ function syncZeroOneFloatWidget(node) {
 }
 
 app.registerExtension({
-    name: "Shaobkj.DynamicInputs",
+    name: "Shaobkj.MainDynamicInputs",
     async setup(app) {
-        if (app.__shaobkjDynamicInputsInstalled) {
+        if (app.__shaobkjMainDynamicInputsInstalled) {
             return;
         }
         if (started) {
             return;
         }
-        app.__shaobkjDynamicInputsInstalled = true;
+        app.__shaobkjMainDynamicInputsInstalled = true;
 
         started = true;
         const ensureTitleHook = () => {
