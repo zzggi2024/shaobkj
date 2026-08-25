@@ -1,0 +1,448 @@
+# Review package: b89172bc3b57b7cd6f60e4da43392e6eba2c85ba..b0788f5
+
+## Commits
+b0788f5 feat: discover and select prompt enhancer models
+
+## Files changed
+ node_multi_prompt_enhancer.py  |   4 +-
+ prompt_enhancer_models.py      | 225 +++++++++++++++++++++++++++++++++++++++++
+ test_prompt_enhancer_models.py | 154 ++++++++++++++++++++++++++++
+ 3 files changed, 382 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/node_multi_prompt_enhancer.py b/node_multi_prompt_enhancer.py
+index 5c0a8a1..cf0f3b2 100644
+--- a/node_multi_prompt_enhancer.py
++++ b/node_multi_prompt_enhancer.py
+@@ -1,11 +1,12 @@
+ from .prompt_enhancer_types import PromptEnhancerError
++from .prompt_enhancer_models import model_option_labels, scan_local_models
+ 
+ 
+ FEATURE_OPTIONS = ["H3", "Seedance", "Music 3"]
+ CHANNEL_OPTIONS = ["自动", "本地模型", "API"]
+ OUTPUT_LANGUAGE_OPTIONS = ["自动", "中文", "English", "日本語", "한국어"]
+ DURATION_OPTIONS = ["自动", *[f"{second}秒" for second in range(1, 301)]]
+ SHOT_COUNT_OPTIONS = ["自动", *[str(count) for count in range(1, 21)]]
+ BPM_OPTIONS = ["自动", *[str(bpm) for bpm in range(40, 241)]]
+ KEY_OPTIONS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+ KEY_SIGNATURE_OPTIONS = [
+@@ -15,25 +16,26 @@ KEY_SIGNATURE_OPTIONS = [
+ ]
+ 
+ 
+ def _multiline_string():
+     return ("STRING", {"default": "", "multiline": True})
+ 
+ 
+ class Shaobkj_Multi_Prompt_Enhancer:
+     @classmethod
+     def INPUT_TYPES(cls):
++        model_options = model_option_labels(scan_local_models(), [])
+         return {
+             "required": {
+                 "功能类型": (FEATURE_OPTIONS,),
+                 "运行渠道": (CHANNEL_OPTIONS,),
+-                "模型选择": (["智能选择"],),
++                "模型选择": (model_options,),
+                 "API密钥": ("STRING", {"default": ""}),
+                 "创作需求": _multiline_string(),
+                 "输出语言": (OUTPUT_LANGUAGE_OPTIONS,),
+                 "随机种": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
+                 "生成模式": (["自动", "T2VA", "I2VA", "FL2VA", "L2VA", "Ref2VA"],),
+                 "任务意图": (
+                     [
+                         "自动",
+                         "T2V",
+                         "I2V",
+diff --git a/prompt_enhancer_models.py b/prompt_enhancer_models.py
+new file mode 100644
+index 0000000..15f70df
+--- /dev/null
++++ b/prompt_enhancer_models.py
+@@ -0,0 +1,225 @@
++import re
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Literal, Sequence
++
++try:
++    import folder_paths
++except ImportError:
++    folder_paths = None
++
++from .api_utils import DEFAULT_API_BASE, load_filtered_models
++from .prompt_enhancer_types import ChannelType, FeatureType, ModelSelectionError
++
++
++@dataclass(frozen=True)
++class LocalModel:
++    model_path: Path
++    relative_path: str
++    mmproj_path: Path | None
++    vision_capable: bool
++
++
++@dataclass(frozen=True)
++class ResolvedModel:
++    channel: Literal["local", "api"]
++    display_name: str
++    model_id: str | None
++    model_path: Path | None
++    mmproj_path: Path | None
++
++
++def _is_mmproj(path: Path) -> bool:
++    name = path.name.casefold()
++    return any(marker in name for marker in ("mmproj", "projector", "vision-proj"))
++
++
++def _model_tokens(path: Path) -> set[str]:
++    stem = path.stem.casefold()
++    stem = re.sub(r"mmproj|projector|vision-proj", " ", stem)
++    tokens = set(re.findall(r"[a-z0-9]+", stem))
++    return {
++        token
++        for token in tokens
++        if not re.fullmatch(r"(?:q|iq|f|bf|fp)\d+(?:_[a-z0-9]+)?", token)
++        and token not in {"k", "m", "s", "l", "xs", "xxs", "xl", "gguf"}
++    }
++
++
++def _matching_projector(model_path: Path, projectors: Sequence[Path]) -> Path | None:
++    candidates = [path for path in projectors if path.parent == model_path.parent]
++    if not candidates:
++        return None
++    if len(candidates) == 1:
++        return candidates[0]
++
++    model_tokens = _model_tokens(model_path)
++    scores = {
++        path: len(model_tokens & _model_tokens(path))
++        for path in candidates
++    }
++    highest_score = max(scores.values())
++    best = [path for path, score in scores.items() if score == highest_score]
++    if highest_score > 0 and len(best) == 1:
++        return best[0]
++    return None
++
++
++def _describe_model(
++    model_path: Path, model_root: Path, projectors: Sequence[Path]
++) -> LocalModel:
++    mmproj_path = _matching_projector(model_path, projectors)
++    return LocalModel(
++        model_path=model_path,
++        relative_path=model_path.relative_to(model_root).as_posix(),
++        mmproj_path=mmproj_path,
++        vision_capable=mmproj_path is not None,
++    )
++
++
++def _default_model_root() -> Path | None:
++    models_dir = getattr(folder_paths, "models_dir", None)
++    if not models_dir:
++        return None
++    return Path(models_dir) / "LLM"
++
++
++def scan_local_models(root: Path | None = None) -> list[LocalModel]:
++    model_root = (root or _default_model_root())
++    if model_root is None:
++        return []
++    model_root = model_root.resolve()
++    if not model_root.is_dir():
++        return []
++
++    files = sorted(
++        (path.resolve() for path in model_root.rglob("*.gguf") if path.is_file()),
++        key=lambda path: path.as_posix(),
++    )
++    safe_files = [path for path in files if path.is_relative_to(model_root)]
++    projectors = [path for path in safe_files if _is_mmproj(path)]
++    return [
++        _describe_model(path, model_root, projectors)
++        for path in safe_files
++        if not _is_mmproj(path)
++    ]
++
++
++def _is_text_generation_model(name: str, info: dict, api_style: str) -> bool:
++    model_name = str(name).casefold()
++    excluded_markers = ("embedding", "tts", "text-to-speech", "video", "sora")
++    if any(marker in model_name for marker in excluded_markers):
++        return False
++    if api_style == "gemini":
++        methods = info.get("supportedGenerationMethods", [])
++        return "generateContent" in methods
++    return api_style == "openai" and "image" not in model_name
++
++
++def discover_api_models(api_key: str) -> list[str]:
++    key = str(api_key or "").strip()
++    if not key:
++        return []
++    return load_filtered_models(
++        cache_prefix="multi_prompt_enhancer",
++        api_key=key,
++        api_base=DEFAULT_API_BASE,
++        use_proxy=False,
++        predicate=_is_text_generation_model,
++    )
++
++
++def model_option_labels(
++    local_models: Sequence[LocalModel], api_models: Sequence[str]
++) -> list[str]:
++    local_labels = [
++        f"[本地] {model.relative_path}"
++        for model in sorted(local_models, key=lambda item: item.relative_path)
++    ]
++    api_labels = [f"[API] {model_id}" for model_id in sorted(api_models)]
++    return ["智能选择", *local_labels, *api_labels]
++
++
++def _requires_vision_projector(feature: FeatureType, has_media: bool) -> bool:
++    return has_media and feature != "Music 3"
++
++
++def _local_is_compatible(
++    model: LocalModel, feature: FeatureType, has_media: bool
++) -> bool:
++    return not _requires_vision_projector(feature, has_media) or model.vision_capable
++
++
++def _resolved_local(model: LocalModel) -> ResolvedModel:
++    return ResolvedModel(
++        channel="local",
++        display_name=f"[本地] {model.relative_path}",
++        model_id=None,
++        model_path=model.model_path,
++        mmproj_path=model.mmproj_path,
++    )
++
++
++def _resolved_api(model_id: str) -> ResolvedModel:
++    return ResolvedModel(
++        channel="api",
++        display_name=f"[API] {model_id}",
++        model_id=model_id,
++        model_path=None,
++        mmproj_path=None,
++    )
++
++
++def _selected_local(selection: str, local_models: Sequence[LocalModel]) -> LocalModel | None:
++    if not selection.startswith("[本地] "):
++        return None
++    relative_path = selection.removeprefix("[本地] ")
++    return next(
++        (model for model in local_models if model.relative_path == relative_path), None
++    )
++
++
++def _selected_api(selection: str, api_models: Sequence[str]) -> str | None:
++    if not selection.startswith("[API] "):
++        return None
++    model_id = selection.removeprefix("[API] ")
++    return model_id if model_id in api_models else None
++
++
++def resolve_model(
++    feature: FeatureType,
++    channel: ChannelType,
++    selection: str,
++    has_media: bool,
++    local_models: Sequence[LocalModel],
++    api_models: Sequence[str],
++) -> ResolvedModel:
++    local_model = _selected_local(selection, local_models)
++    api_model = _selected_api(selection, api_models)
++    is_manual_selection = selection != "智能选择"
++
++    if is_manual_selection and local_model is None and api_model is None:
++        raise ModelSelectionError("所选模型不在当前模型目录中。")
++    if local_model is not None and channel == "API":
++        raise ModelSelectionError("所选本地模型与运行渠道不一致。")
++    if api_model is not None and channel == "本地模型":
++        raise ModelSelectionError("所选 API 模型与运行渠道不一致。")
++    if local_model is not None:
++        if not _local_is_compatible(local_model, feature, has_media):
++            raise ModelSelectionError("携带素材时，本地模型需要匹配的视觉投影器。")
++        return _resolved_local(local_model)
++    if api_model is not None:
++        return _resolved_api(api_model)
++
++    compatible_locals = [
++        model
++        for model in sorted(local_models, key=lambda item: item.relative_path)
++        if _local_is_compatible(model, feature, has_media)
++    ]
++    if channel in ("自动", "本地模型") and compatible_locals:
++        return _resolved_local(compatible_locals[0])
++    if channel in ("自动", "API") and api_models:
++        return _resolved_api(sorted(api_models)[0])
++    if channel == "本地模型" and _requires_vision_projector(feature, has_media):
++        raise ModelSelectionError("携带素材时，本地模型需要匹配的视觉投影器。")
++    raise ModelSelectionError("没有可用于当前运行渠道的兼容模型。")
+diff --git a/test_prompt_enhancer_models.py b/test_prompt_enhancer_models.py
+new file mode 100644
+index 0000000..44a12f7
+--- /dev/null
++++ b/test_prompt_enhancer_models.py
+@@ -0,0 +1,154 @@
++import importlib
++import sys
++import tempfile
++import types
++import unittest
++from pathlib import Path
++from unittest.mock import patch
++
++
++PROJECT_ROOT = Path(__file__).resolve().parent
++
++
++def load_models_module(models_dir: Path):
++    folder_paths = types.ModuleType("folder_paths")
++    folder_paths.models_dir = str(models_dir)
++    sys.modules["folder_paths"] = folder_paths
++
++    package = types.ModuleType("shaobkj")
++    package.__path__ = [str(PROJECT_ROOT)]
++    sys.modules["shaobkj"] = package
++    for name in (
++        "shaobkj.prompt_enhancer_models",
++        "shaobkj.prompt_enhancer_types",
++        "shaobkj.api_utils",
++    ):
++        sys.modules.pop(name, None)
++    return importlib.import_module("shaobkj.prompt_enhancer_models")
++
++
++def write_gguf(path: Path) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_bytes(b"GGUF")
++
++
++class PromptEnhancerModelTests(unittest.TestCase):
++    def setUp(self):
++        self.temp_dir = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp_dir.cleanup)
++        self.root = Path(self.temp_dir.name) / "LLM"
++        self.models = load_models_module(self.root.parent)
++        self.text_model = self.models.LocalModel(
++            self.root / "model.gguf", "model.gguf", None, False
++        )
++
++    def test_scan_recurses_and_distinguishes_duplicate_names(self):
++        write_gguf(self.root / "a" / "model.gguf")
++        write_gguf(self.root / "b" / "model.gguf")
++
++        labels = [item.relative_path for item in self.models.scan_local_models(self.root)]
++
++        self.assertEqual(labels, ["a/model.gguf", "b/model.gguf"])
++
++    def test_scan_uses_dynamic_llm_root_and_pairs_matching_projector(self):
++        write_gguf(self.root / "vision-model-Q4_K_M.gguf")
++        projector = self.root / "vision-model-mmproj-Q4_K_M.gguf"
++        write_gguf(projector)
++
++        models = self.models.scan_local_models()
++
++        self.assertEqual(len(models), 1)
++        self.assertEqual(models[0].model_path.name, "vision-model-Q4_K_M.gguf")
++        self.assertEqual(models[0].mmproj_path, projector.resolve())
++        self.assertTrue(models[0].vision_capable)
++
++    def test_scan_returns_empty_when_comfy_model_root_is_unavailable(self):
++        del self.models.folder_paths.models_dir
++
++        self.assertEqual(self.models.scan_local_models(), [])
++
++    def test_scan_does_not_guess_ambiguous_projector(self):
++        write_gguf(self.root / "model.gguf")
++        write_gguf(self.root / "model-mmproj-a.gguf")
++        write_gguf(self.root / "model-projector-b.gguf")
++
++        models = self.models.scan_local_models(self.root)
++
++        self.assertIsNone(models[0].mmproj_path)
++        self.assertFalse(models[0].vision_capable)
++
++    def test_discover_api_models_skips_network_without_key(self):
++        with patch.object(self.models, "load_filtered_models") as discovery:
++            self.assertEqual(self.models.discover_api_models("  "), [])
++
++        discovery.assert_not_called()
++
++    def test_discover_api_models_uses_direct_filtered_catalog(self):
++        with patch.object(
++            self.models, "load_filtered_models", return_value=["gpt-x"]
++        ) as discovery:
++            self.assertEqual(self.models.discover_api_models("key"), ["gpt-x"])
++
++        kwargs = discovery.call_args.kwargs
++        self.assertEqual(kwargs["cache_prefix"], "multi_prompt_enhancer")
++        self.assertEqual(kwargs["api_key"], "key")
++        self.assertEqual(kwargs["api_base"], self.models.DEFAULT_API_BASE)
++        self.assertFalse(kwargs["use_proxy"])
++        self.assertTrue(kwargs["predicate"]("gemini-2.5-flash", {"supportedGenerationMethods": ["generateContent"]}, "gemini"))
++        self.assertTrue(kwargs["predicate"]("gpt-x", {}, "openai"))
++        self.assertFalse(kwargs["predicate"]("text-embedding-3-small", {}, "openai"))
++        self.assertFalse(kwargs["predicate"]("gpt-image-2", {}, "openai"))
++        self.assertFalse(kwargs["predicate"]("gemini-image", {"supportedGenerationMethods": ["generateImages"]}, "gemini"))
++
++    def test_model_option_labels_sort_by_source_and_name(self):
++        local_models = [
++            self.models.LocalModel(self.root / "z.gguf", "z.gguf", None, False),
++            self.models.LocalModel(self.root / "a.gguf", "a.gguf", None, False),
++        ]
++
++        labels = self.models.model_option_labels(local_models, ["z-api", "a-api"])
++
++        self.assertEqual(
++            labels,
++            ["智能选择", "[本地] a.gguf", "[本地] z.gguf", "[API] a-api", "[API] z-api"],
++        )
++
++    def test_visual_task_requires_matching_mmproj(self):
++        with self.assertRaisesRegex(self.models.ModelSelectionError, "视觉投影器"):
++            self.models.resolve_model(
++                "H3", "本地模型", "[本地] model.gguf", True, [self.text_model], []
++            )
++
++    def test_music_three_never_requires_mmproj(self):
++        resolved = self.models.resolve_model(
++            "Music 3", "本地模型", "[本地] model.gguf", True, [self.text_model], []
++        )
++
++        self.assertEqual(resolved.channel, "local")
++        self.assertEqual(resolved.model_path, self.text_model.model_path)
++
++    def test_auto_prefers_compatible_local_then_api(self):
++        local = self.models.resolve_model(
++            "Music 3", "自动", "智能选择", False, [self.text_model], ["gpt-x"]
++        )
++        api = self.models.resolve_model(
++            "H3", "自动", "智能选择", True, [self.text_model], ["gpt-x"]
++        )
++
++        self.assertEqual(local.channel, "local")
++        self.assertEqual(api.channel, "api")
++
++    def test_manual_selection_has_priority_and_channel_must_agree(self):
++        resolved = self.models.resolve_model(
++            "H3", "自动", "[API] gpt-x", False, [self.text_model], ["gpt-x"]
++        )
++        self.assertEqual(resolved.model_id, "gpt-x")
++
++        with self.assertRaisesRegex(self.models.ModelSelectionError, "运行渠道"):
++            self.models.resolve_model(
++                "H3", "API", "[本地] model.gguf", False, [self.text_model], ["gpt-x"]
++            )
++
++
++if __name__ == "__main__":
++    unittest.main()

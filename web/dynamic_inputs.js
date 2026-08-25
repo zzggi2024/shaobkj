@@ -113,7 +113,8 @@ const THEME_CONFIG = {
     "Shaobkj_GPTImage2_Batch_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_GPT2Edits_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_LLM_App": { color: "#7D24A6", bgcolor: "#1E0A29" },
-    "Shaobkj_H3_Video_Prompt": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_Multi_Prompt_Enhancer": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "✨ 多模型提示词增强器": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_Doubao_Image": { color: "#7D24A6", bgcolor: "#1E0A29" },
 
 
@@ -2156,6 +2157,7 @@ app.registerExtension({
         const category = nodeData?.category || "";
         const isShaobkjCategory = category.startsWith("🤖shaobkj-APIbox") || category.startsWith("🤖shaobkj-APlbox");
         const needsDynamicInputs = shouldManageDynamicInputsByNodeData(nodeData);
+        const usesDedicatedEnhancerUi = nodeData?.name === "Shaobkj_Multi_Prompt_Enhancer";
         if (isShaobkjCategory || needsDynamicInputs) {
             // Apply theme prototype
             const theme = getThemeForNode({ comfyClass: nodeData.name, title: nodeData.display_name });
@@ -2173,7 +2175,7 @@ app.registerExtension({
                     manageImageSplitOutputs(this);
                 } else if (needsDynamicInputs) {
                     manageInputs(this, true);
-                } else {
+                } else if (!usesDedicatedEnhancerUi) {
                     cleanupDynamicInputs(this);
                 }
 
@@ -2197,7 +2199,7 @@ app.registerExtension({
                         manageImageSplitOutputs(this);
                     } else if (needsDynamicInputs) {
                         manageInputs(this, true);
-                    } else {
+                    } else if (!usesDedicatedEnhancerUi) {
                         cleanupDynamicInputs(this);
                     }
                 }, 50);
@@ -2215,7 +2217,7 @@ app.registerExtension({
                             manageImageSplitOutputs(this);
                         } else if (needsDynamicInputs) {
                             manageInputs(this);
-                        } else {
+                        } else if (!usesDedicatedEnhancerUi) {
                             cleanupDynamicInputs(this);
                         }
                     }, 50);
@@ -2239,7 +2241,7 @@ app.registerExtension({
                         manageImageSplitOutputs(this);
                     } else if (needsDynamicInputs) {
                         manageInputs(this);
-                    } else {
+                    } else if (!usesDedicatedEnhancerUi) {
                         cleanupDynamicInputs(this);
                     }
                 }, 50);

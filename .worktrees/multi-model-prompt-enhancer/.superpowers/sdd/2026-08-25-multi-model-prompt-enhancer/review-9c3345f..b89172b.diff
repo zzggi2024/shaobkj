@@ -1,0 +1,66 @@
+# Review package: 9c3345f..b89172b
+
+## Commits
+b89172b fix: restore multi-prompt enhancer display name
+
+## Files changed
+ nodes.py                               | 2 +-
+ test_multi_prompt_enhancer_contract.py | 3 +++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/nodes.py b/nodes.py
+index 1060705..089e0b3 100644
+--- a/nodes.py
++++ b/nodes.py
+@@ -109,21 +109,21 @@ NODE_DISPLAY_NAME_MAPPINGS = {
+     "Shaobkj_Seedance_Video": "seedance视频生成",
+     "Shaobkj_H3_Video": "🎬 H3视频生成",
+     "Shaobkj_Grok_Video": "🎬 Grok视频",
+     "Shaobkj_ConcurrentImageEdit_Sender": "🤖Nano-并发-编辑-图像驱动",
+     "Shaobkj_GroupedConcurrentImageEdit": "🧩Nano-组合并发",
+     "Shaobkj_Load_Image_Path": "🤖加载图像",
+     "Shaobkj_Load_Batch_Images": "🤖批量加载图像(路径)",
+     "Shaobkj_Image_Save": "🤖图像保存",
+     "Shaobkj_Fixed_Seed": "🤖固定随机种子",
+     "Shaobkj_LLM_App": "🤖LLM应用",
+-    "Shaobkj_Multi_Prompt_Enhancer": "多模型提示词增强器",
++    "Shaobkj_Multi_Prompt_Enhancer": "✨ 多模型提示词增强器",
+     "Shaobkj_Media_Reverse_Prompt": "🔍视频/图片-反推",
+     "Shaobkj_ForLoop_Start": "🤖循环开始",
+     "Shaobkj_ForLoop_End": "🤖循环结束",
+     "Shaobkj_Loop_Trigger": "🔁循环触发",
+     "Shaobkj_NanoBanana_Prompt": "🤖香蕉专属提示词",
+     "Shaobkj_LoadImageListFromDir": "🤖加载图像列表(路径)",
+     "Shaobkj_ResolutionJudge": "🤖分辨率智能判断",
+     "Shaobkj_GetEdgeLength": "🤖获取边长",
+     "Shaobkj_Load_Florence2_Model": "🤖加载Florence2模型(急速)",
+     "Shaobkj_Florence2_Fast_Prompt": "🤖图像急速反推",
+diff --git a/test_multi_prompt_enhancer_contract.py b/test_multi_prompt_enhancer_contract.py
+index b4ebf4c..83f79f6 100644
+--- a/test_multi_prompt_enhancer_contract.py
++++ b/test_multi_prompt_enhancer_contract.py
+@@ -16,20 +16,23 @@ def load_module_with_comfy_stubs(filename):
+     sys.modules.pop(module_name, None)
+     return importlib.import_module(module_name)
+ 
+ 
+ class MultiPromptEnhancerContractTests(unittest.TestCase):
+     def test_new_node_is_registered_and_old_prompt_node_is_absent(self):
+         source = (PROJECT_ROOT / "nodes.py").read_text(encoding="utf-8")
+         self.assertIn('"Shaobkj_Multi_Prompt_Enhancer"', source)
+         self.assertNotIn('"Shaobkj_H3_Video_Prompt"', source)
+         self.assertIn('"Shaobkj_H3_Video"', source)
++        self.assertIn(
++            '"Shaobkj_Multi_Prompt_Enhancer": "✨ 多模型提示词增强器"', source
++        )
+ 
+     def test_node_has_fixed_public_contract(self):
+         module = load_module_with_comfy_stubs("node_multi_prompt_enhancer.py")
+         node = module.Shaobkj_Multi_Prompt_Enhancer
+         inputs = node.INPUT_TYPES()
+         required = inputs["required"]
+         self.assertEqual(
+             list(required)[:7],
+             [
+                 "功能类型",

@@ -1,0 +1,313 @@
+# Review package: b0788f5..59efa28
+
+## Commits
+59efa28 fix: validate media prompt api models
+
+## Files changed
+ prompt_enhancer_models.py      | 78 ++++++++++++++++++++++++++++++++++++++----
+ test_prompt_enhancer_models.py | 64 ++++++++++++++++++++++++++++++++--
+ 2 files changed, 134 insertions(+), 8 deletions(-)
+
+## Diff
+diff --git a/prompt_enhancer_models.py b/prompt_enhancer_models.py
+index 15f70df..2049f92 100644
+--- a/prompt_enhancer_models.py
++++ b/prompt_enhancer_models.py
+@@ -5,20 +5,23 @@ from typing import Literal, Sequence
+ 
+ try:
+     import folder_paths
+ except ImportError:
+     folder_paths = None
+ 
+ from .api_utils import DEFAULT_API_BASE, load_filtered_models
+ from .prompt_enhancer_types import ChannelType, FeatureType, ModelSelectionError
+ 
+ 
++_API_MEDIA_CAPABILITIES: dict[str, bool] = {}
++
++
+ @dataclass(frozen=True)
+ class LocalModel:
+     model_path: Path
+     relative_path: str
+     mmproj_path: Path | None
+     vision_capable: bool
+ 
+ 
+ @dataclass(frozen=True)
+ class ResolvedModel:
+@@ -100,27 +103,73 @@ def scan_local_models(root: Path | None = None) -> list[LocalModel]:
+     projectors = [path for path in safe_files if _is_mmproj(path)]
+     return [
+         _describe_model(path, model_root, projectors)
+         for path in safe_files
+         if not _is_mmproj(path)
+     ]
+ 
+ 
+ def _is_text_generation_model(name: str, info: dict, api_style: str) -> bool:
+     model_name = str(name).casefold()
+-    excluded_markers = ("embedding", "tts", "text-to-speech", "video", "sora")
++    excluded_markers = (
++        "dall-e",
++        "embedding",
++        "imagen",
++        "seedance",
++        "sora",
++        "text-to-speech",
++        "tts",
++        "veo",
++        "video",
++    )
+     if any(marker in model_name for marker in excluded_markers):
+         return False
+     if api_style == "gemini":
+         methods = info.get("supportedGenerationMethods", [])
+-        return "generateContent" in methods
+-    return api_style == "openai" and "image" not in model_name
++        is_text_model = "generateContent" in methods
++    else:
++        is_text_model = api_style == "openai" and "image" not in model_name
++    if is_text_model:
++        _API_MEDIA_CAPABILITIES[name] = _catalog_media_capability(name, info)
++    return is_text_model
++
++
++def _catalog_media_capability(model_id: str, info: dict) -> bool:
++    modality_keys = ("inputModalities", "input_modalities")
++    for key in modality_keys:
++        modalities = info.get(key)
++        if modalities is None:
++            continue
++        values = modalities if isinstance(modalities, (list, tuple, set)) else [modalities]
++        return any(
++            marker in str(value).casefold()
++            for value in values
++            for marker in ("image", "vision", "video")
++        )
++
++    capabilities = info.get("capabilities")
++    if isinstance(capabilities, dict):
++        for key in ("vision", "image_input", "imageInput", "multimodal"):
++            if key in capabilities:
++                return bool(capabilities[key])
++    return _known_api_media_capability(model_id)
++
++
++def _known_api_media_capability(model_id: str) -> bool:
++    normalized = model_id.casefold()
++    return normalized.startswith(("gemini-", "gpt-4o", "gpt-4.1", "gpt-5"))
++
++
++def _api_supports_media(model_id: str) -> bool:
++    return _API_MEDIA_CAPABILITIES.get(
++        model_id, _known_api_media_capability(model_id)
++    )
+ 
+ 
+ def discover_api_models(api_key: str) -> list[str]:
+     key = str(api_key or "").strip()
+     if not key:
+         return []
+     return load_filtered_models(
+         cache_prefix="multi_prompt_enhancer",
+         api_key=key,
+         api_base=DEFAULT_API_BASE,
+@@ -143,20 +192,26 @@ def model_option_labels(
+ def _requires_vision_projector(feature: FeatureType, has_media: bool) -> bool:
+     return has_media and feature != "Music 3"
+ 
+ 
+ def _local_is_compatible(
+     model: LocalModel, feature: FeatureType, has_media: bool
+ ) -> bool:
+     return not _requires_vision_projector(feature, has_media) or model.vision_capable
+ 
+ 
++def _api_is_compatible(model_id: str, feature: FeatureType, has_media: bool) -> bool:
++    return not _requires_vision_projector(feature, has_media) or _api_supports_media(
++        model_id
++    )
++
++
+ def _resolved_local(model: LocalModel) -> ResolvedModel:
+     return ResolvedModel(
+         channel="local",
+         display_name=f"[本地] {model.relative_path}",
+         model_id=None,
+         model_path=model.model_path,
+         mmproj_path=model.mmproj_path,
+     )
+ 
+ 
+@@ -192,34 +247,45 @@ def resolve_model(
+     selection: str,
+     has_media: bool,
+     local_models: Sequence[LocalModel],
+     api_models: Sequence[str],
+ ) -> ResolvedModel:
+     local_model = _selected_local(selection, local_models)
+     api_model = _selected_api(selection, api_models)
+     is_manual_selection = selection != "智能选择"
+ 
+     if is_manual_selection and local_model is None and api_model is None:
+-        raise ModelSelectionError("所选模型不在当前模型目录中。")
++        if selection.startswith("[API] "):
++            raise ModelSelectionError("所选 API 模型不在当前模型列表中。")
++        raise ModelSelectionError("所选本地模型不在当前模型目录中。")
+     if local_model is not None and channel == "API":
+         raise ModelSelectionError("所选本地模型与运行渠道不一致。")
+     if api_model is not None and channel == "本地模型":
+         raise ModelSelectionError("所选 API 模型与运行渠道不一致。")
+     if local_model is not None:
+         if not _local_is_compatible(local_model, feature, has_media):
+             raise ModelSelectionError("携带素材时，本地模型需要匹配的视觉投影器。")
+         return _resolved_local(local_model)
+     if api_model is not None:
++        if not _api_is_compatible(api_model, feature, has_media):
++            raise ModelSelectionError("携带素材时，API 模型需要视觉能力。")
+         return _resolved_api(api_model)
+ 
+     compatible_locals = [
+         model
+         for model in sorted(local_models, key=lambda item: item.relative_path)
+         if _local_is_compatible(model, feature, has_media)
+     ]
+     if channel in ("自动", "本地模型") and compatible_locals:
+         return _resolved_local(compatible_locals[0])
+-    if channel in ("自动", "API") and api_models:
+-        return _resolved_api(sorted(api_models)[0])
++    compatible_apis = [
++        model_id
++        for model_id in sorted(api_models)
++        if _api_is_compatible(model_id, feature, has_media)
++    ]
++    if channel in ("自动", "API") and compatible_apis:
++        return _resolved_api(compatible_apis[0])
+     if channel == "本地模型" and _requires_vision_projector(feature, has_media):
+         raise ModelSelectionError("携带素材时，本地模型需要匹配的视觉投影器。")
++    if channel in ("自动", "API") and _requires_vision_projector(feature, has_media):
++        raise ModelSelectionError("携带素材时，API 模型需要视觉能力。")
+     raise ModelSelectionError("没有可用于当前运行渠道的兼容模型。")
+diff --git a/test_prompt_enhancer_models.py b/test_prompt_enhancer_models.py
+index 44a12f7..34f3906 100644
+--- a/test_prompt_enhancer_models.py
++++ b/test_prompt_enhancer_models.py
+@@ -91,20 +91,24 @@ class PromptEnhancerModelTests(unittest.TestCase):
+ 
+         kwargs = discovery.call_args.kwargs
+         self.assertEqual(kwargs["cache_prefix"], "multi_prompt_enhancer")
+         self.assertEqual(kwargs["api_key"], "key")
+         self.assertEqual(kwargs["api_base"], self.models.DEFAULT_API_BASE)
+         self.assertFalse(kwargs["use_proxy"])
+         self.assertTrue(kwargs["predicate"]("gemini-2.5-flash", {"supportedGenerationMethods": ["generateContent"]}, "gemini"))
+         self.assertTrue(kwargs["predicate"]("gpt-x", {}, "openai"))
+         self.assertFalse(kwargs["predicate"]("text-embedding-3-small", {}, "openai"))
+         self.assertFalse(kwargs["predicate"]("gpt-image-2", {}, "openai"))
++        self.assertFalse(kwargs["predicate"]("dall-e-3", {}, "openai"))
++        self.assertFalse(kwargs["predicate"]("imagen-4.0-generate", {}, "gemini"))
++        self.assertFalse(kwargs["predicate"]("veo-3.0-generate", {}, "gemini"))
++        self.assertFalse(kwargs["predicate"]("seedance-1.5-pro", {}, "openai"))
+         self.assertFalse(kwargs["predicate"]("gemini-image", {"supportedGenerationMethods": ["generateImages"]}, "gemini"))
+ 
+     def test_model_option_labels_sort_by_source_and_name(self):
+         local_models = [
+             self.models.LocalModel(self.root / "z.gguf", "z.gguf", None, False),
+             self.models.LocalModel(self.root / "a.gguf", "a.gguf", None, False),
+         ]
+ 
+         labels = self.models.model_option_labels(local_models, ["z-api", "a-api"])
+ 
+@@ -122,33 +126,89 @@ class PromptEnhancerModelTests(unittest.TestCase):
+     def test_music_three_never_requires_mmproj(self):
+         resolved = self.models.resolve_model(
+             "Music 3", "本地模型", "[本地] model.gguf", True, [self.text_model], []
+         )
+ 
+         self.assertEqual(resolved.channel, "local")
+         self.assertEqual(resolved.model_path, self.text_model.model_path)
+ 
+     def test_auto_prefers_compatible_local_then_api(self):
+         local = self.models.resolve_model(
+-            "Music 3", "自动", "智能选择", False, [self.text_model], ["gpt-x"]
++            "Music 3", "自动", "智能选择", False, [self.text_model], ["gpt-4o"]
+         )
+         api = self.models.resolve_model(
+-            "H3", "自动", "智能选择", True, [self.text_model], ["gpt-x"]
++            "H3", "自动", "智能选择", True, [self.text_model], ["gpt-4o"]
+         )
+ 
+         self.assertEqual(local.channel, "local")
+         self.assertEqual(api.channel, "api")
+ 
++    def test_media_task_accepts_known_vision_api_model(self):
++        resolved = self.models.resolve_model(
++            "H3", "API", "[API] gpt-4o-mini", True, [], ["gpt-4o-mini"]
++        )
++
++        self.assertEqual(resolved.model_id, "gpt-4o-mini")
++
++    def test_catalog_without_repeated_model_id_keeps_known_media_capability(self):
++        self.assertTrue(self.models._is_text_generation_model("gpt-4o", {}, "openai"))
++
++        resolved = self.models.resolve_model(
++            "H3", "API", "[API] gpt-4o", True, [], ["gpt-4o"]
++        )
++
++        self.assertEqual(resolved.model_id, "gpt-4o")
++
++    def test_catalog_metadata_allows_unknown_vision_api_model(self):
++        self.assertTrue(
++            self.models._is_text_generation_model(
++                "provider-vision", {"inputModalities": ["TEXT", "IMAGE"]}, "openai"
++            )
++        )
++
++        resolved = self.models.resolve_model(
++            "H3", "API", "[API] provider-vision", True, [], ["provider-vision"]
++        )
++
++        self.assertEqual(resolved.model_id, "provider-vision")
++
++    def test_media_task_rejects_manual_text_only_api_model(self):
++        with self.assertRaisesRegex(self.models.ModelSelectionError, "视觉"):
++            self.models.resolve_model(
++                "H3", "API", "[API] gpt-3.5-turbo", True, [], ["gpt-3.5-turbo"]
++            )
++
++    def test_media_task_rejects_manual_unknown_api_model(self):
++        with self.assertRaisesRegex(self.models.ModelSelectionError, "视觉"):
++            self.models.resolve_model(
++                "H3", "API", "[API] gpt-x", True, [], ["gpt-x"]
++            )
++
++    def test_media_task_rejects_automatic_unknown_api_model(self):
++        with self.assertRaisesRegex(self.models.ModelSelectionError, "视觉"):
++            self.models.resolve_model("H3", "API", "智能选择", True, [], ["gpt-x"])
++
++    def test_automatic_media_selection_skips_text_only_api_models(self):
++        resolved = self.models.resolve_model(
++            "H3", "API", "智能选择", True, [], ["gpt-3.5-turbo", "gpt-4o"]
++        )
++
++        self.assertEqual(resolved.model_id, "gpt-4o")
++
+     def test_manual_selection_has_priority_and_channel_must_agree(self):
+         resolved = self.models.resolve_model(
+             "H3", "自动", "[API] gpt-x", False, [self.text_model], ["gpt-x"]
+         )
+         self.assertEqual(resolved.model_id, "gpt-x")
+ 
+         with self.assertRaisesRegex(self.models.ModelSelectionError, "运行渠道"):
+             self.models.resolve_model(
+                 "H3", "API", "[本地] model.gguf", False, [self.text_model], ["gpt-x"]
+             )
+ 
++    def test_stale_api_selection_reports_model_catalog(self):
++        with self.assertRaisesRegex(self.models.ModelSelectionError, "模型列表"):
++            self.models.resolve_model("H3", "API", "[API] missing", False, [], [])
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

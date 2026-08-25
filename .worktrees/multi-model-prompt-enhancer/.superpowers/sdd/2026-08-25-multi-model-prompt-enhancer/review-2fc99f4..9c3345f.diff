@@ -1,0 +1,440 @@
+# Review package: 2fc99f4aef8d83b4c5887ac050df38421cb0a079..9c3345f
+
+## Commits
+9c3345f feat: define multi-model prompt enhancer contract
+
+## Files changed
+ node_multi_prompt_enhancer.py          | 101 +++++++++++++++++++++++++++++++++
+ nodes.py                               |   6 +-
+ prompt_enhancer_types.py               |  58 +++++++++++++++++++
+ test_h3_video_prompt.py                |   5 +-
+ test_multi_prompt_enhancer_contract.py |  89 +++++++++++++++++++++++++++++
+ test_node_contracts.py                 |   8 ++-
+ 6 files changed, 259 insertions(+), 8 deletions(-)
+
+## Diff
+diff --git a/node_multi_prompt_enhancer.py b/node_multi_prompt_enhancer.py
+new file mode 100644
+index 0000000..5c0a8a1
+--- /dev/null
++++ b/node_multi_prompt_enhancer.py
+@@ -0,0 +1,101 @@
++from .prompt_enhancer_types import PromptEnhancerError
++
++
++FEATURE_OPTIONS = ["H3", "Seedance", "Music 3"]
++CHANNEL_OPTIONS = ["自动", "本地模型", "API"]
++OUTPUT_LANGUAGE_OPTIONS = ["自动", "中文", "English", "日本語", "한국어"]
++DURATION_OPTIONS = ["自动", *[f"{second}秒" for second in range(1, 301)]]
++SHOT_COUNT_OPTIONS = ["自动", *[str(count) for count in range(1, 21)]]
++BPM_OPTIONS = ["自动", *[str(bpm) for bpm in range(40, 241)]]
++KEY_OPTIONS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
++KEY_SIGNATURE_OPTIONS = [
++    "自动",
++    *[f"{key} major" for key in KEY_OPTIONS],
++    *[f"{key} minor" for key in KEY_OPTIONS],
++]
++
++
++def _multiline_string():
++    return ("STRING", {"default": "", "multiline": True})
++
++
++class Shaobkj_Multi_Prompt_Enhancer:
++    @classmethod
++    def INPUT_TYPES(cls):
++        return {
++            "required": {
++                "功能类型": (FEATURE_OPTIONS,),
++                "运行渠道": (CHANNEL_OPTIONS,),
++                "模型选择": (["智能选择"],),
++                "API密钥": ("STRING", {"default": ""}),
++                "创作需求": _multiline_string(),
++                "输出语言": (OUTPUT_LANGUAGE_OPTIONS,),
++                "随机种": ("INT", {"default": 0, "min": 0, "max": 2147483647}),
++                "生成模式": (["自动", "T2VA", "I2VA", "FL2VA", "L2VA", "Ref2VA"],),
++                "任务意图": (
++                    [
++                        "自动",
++                        "T2V",
++                        "I2V",
++                        "FL-I2V",
++                        "多模态参考",
++                        "视频编辑",
++                        "视频延长",
++                        "轨道补齐",
++                        "组合任务",
++                    ],
++                ),
++                "目标时长": (DURATION_OPTIONS,),
++                "画幅比例": (["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],),
++                "镜头数量": (SHOT_COUNT_OPTIONS,),
++                "组织方式": (["自动", "简单一段式", "复杂分镜式"],),
++                "改写幅度": (["保守", "均衡", "创意"],),
++                "创作幅度": (["保守", "均衡", "创意"],),
++                "提示词模式": (["官方优化", "参考模板融合"],),
++                "官方场景预设": (
++                    [
++                        "无",
++                        "自动",
++                        "极简产品广告",
++                        "3D动画短片",
++                        "纸艺定格科普",
++                        "品牌宣传短片",
++                        "音乐MV动态字幕",
++                        "双人游戏开场",
++                        "纸拼贴讲解",
++                        "手绘实拍融合",
++                    ],
++                ),
++                "原生音频": ("BOOLEAN", {"default": False}),
++                "歌词模式": (["自动", "生成新歌词", "严格保留", "按要求润色", "纯器乐"],),
++                "歌词语言": (OUTPUT_LANGUAGE_OPTIONS,),
++                "质量模式": (["快速核心", "官方完整（多阶段请求）"],),
++                "歌曲结构": (["自动", "Verse-Chorus", "标准流行结构", "自定义"],),
++                "BPM": (BPM_OPTIONS,),
++                "调式": (KEY_SIGNATURE_OPTIONS,),
++                "拍号": (["自动", "2/4", "3/4", "4/4", "6/8", "12/8"],),
++                "参考模板": _multiline_string(),
++                "素材用途": _multiline_string(),
++                "素材补充": _multiline_string(),
++                "硬性要求": _multiline_string(),
++                "硬性要求与排除项": _multiline_string(),
++                "原歌词": _multiline_string(),
++                "润色要求": _multiline_string(),
++                "自定义结构标签": _multiline_string(),
++            },
++            "optional": {
++                "首帧图": ("IMAGE",),
++                "尾帧图": ("IMAGE",),
++                "参考图片1": ("IMAGE",),
++                "参考视频1": ("VIDEO",),
++                "参考音频1": ("AUDIO",),
++            },
++        }
++
++    RETURN_TYPES = ("STRING",)
++    RETURN_NAMES = ("最终提示词",)
++    FUNCTION = "generate_prompt"
++    CATEGORY = "🤖shaobkj-APlbox"
++
++    def generate_prompt(self, **kwargs) -> tuple[str]:
++        raise PromptEnhancerError("多模型提示词增强器尚未完成执行接线")
+diff --git a/nodes.py b/nodes.py
+index 68f08a3..1060705 100644
+--- a/nodes.py
++++ b/nodes.py
+@@ -14,21 +14,21 @@ from .node_concurrent_image_edit import (
+     Shaobkj_Load_Image_Path,
+     Shaobkj_Load_Batch_Images,
+     Shaobkj_Image_Save,
+     Shaobkj_Fixed_Seed,
+ )
+ from .node_llm_app import (
+     Shaobkj_LLM_App,
+     Shaobkj_Media_Reverse_Prompt,
+     Shaobkj_NanoBanana_Prompt,
+ )
+-from .node_h3_video_prompt import Shaobkj_H3_Video_Prompt
++from .node_multi_prompt_enhancer import Shaobkj_Multi_Prompt_Enhancer
+ from .node_loop import Shaobkj_ForLoop_Start, Shaobkj_ForLoop_End, Shaobkj_Loop_Trigger
+ from .node_load_image_list import Shaobkj_LoadImageListFromDir
+ from .node_resolution_judge import Shaobkj_ResolutionJudge, Shaobkj_GetEdgeLength
+ from .node_florence2_fast_prompt import (
+     Shaobkj_Load_Florence2_Model,
+     Shaobkj_Florence2_Fast_Prompt,
+ )
+ from .node_free_color import Shaobkj_FreeColor
+ from .node_text_process import Shaobkj_Text_Process, Shaobkj_InfinitePromptJoin
+ from .node_quick_mark import Shaobkj_QuickMark
+@@ -58,21 +58,21 @@ NODE_CLASS_MAPPINGS = {
+     "Shaobkj_Seedance_Video": Shaobkj_Seedance_Video,
+     "Shaobkj_H3_Video": Shaobkj_H3_Video,
+     "Shaobkj_Grok_Video": Shaobkj_Grok_Video,
+     "Shaobkj_ConcurrentImageEdit_Sender": Shaobkj_ConcurrentImageEdit_Sender,
+     "Shaobkj_GroupedConcurrentImageEdit": Shaobkj_GroupedConcurrentImageEdit,
+     "Shaobkj_Load_Image_Path": Shaobkj_Load_Image_Path,
+     "Shaobkj_Load_Batch_Images": Shaobkj_Load_Batch_Images,
+     "Shaobkj_Image_Save": Shaobkj_Image_Save,
+     "Shaobkj_Fixed_Seed": Shaobkj_Fixed_Seed,
+     "Shaobkj_LLM_App": Shaobkj_LLM_App,
+-    "Shaobkj_H3_Video_Prompt": Shaobkj_H3_Video_Prompt,
++    "Shaobkj_Multi_Prompt_Enhancer": Shaobkj_Multi_Prompt_Enhancer,
+     "Shaobkj_Media_Reverse_Prompt": Shaobkj_Media_Reverse_Prompt,
+     "Shaobkj_ForLoop_Start": Shaobkj_ForLoop_Start,
+     "Shaobkj_ForLoop_End": Shaobkj_ForLoop_End,
+     "Shaobkj_Loop_Trigger": Shaobkj_Loop_Trigger,
+     "Shaobkj_NanoBanana_Prompt": Shaobkj_NanoBanana_Prompt,
+     "Shaobkj_LoadImageListFromDir": Shaobkj_LoadImageListFromDir,
+     "Shaobkj_ResolutionJudge": Shaobkj_ResolutionJudge,
+     "Shaobkj_GetEdgeLength": Shaobkj_GetEdgeLength,
+     "Shaobkj_Load_Florence2_Model": Shaobkj_Load_Florence2_Model,
+     "Shaobkj_Florence2_Fast_Prompt": Shaobkj_Florence2_Fast_Prompt,
+@@ -109,21 +109,21 @@ NODE_DISPLAY_NAME_MAPPINGS = {
+     "Shaobkj_Seedance_Video": "seedance视频生成",
+     "Shaobkj_H3_Video": "🎬 H3视频生成",
+     "Shaobkj_Grok_Video": "🎬 Grok视频",
+     "Shaobkj_ConcurrentImageEdit_Sender": "🤖Nano-并发-编辑-图像驱动",
+     "Shaobkj_GroupedConcurrentImageEdit": "🧩Nano-组合并发",
+     "Shaobkj_Load_Image_Path": "🤖加载图像",
+     "Shaobkj_Load_Batch_Images": "🤖批量加载图像(路径)",
+     "Shaobkj_Image_Save": "🤖图像保存",
+     "Shaobkj_Fixed_Seed": "🤖固定随机种子",
+     "Shaobkj_LLM_App": "🤖LLM应用",
+-    "Shaobkj_H3_Video_Prompt": "视频提示词生成器",
++    "Shaobkj_Multi_Prompt_Enhancer": "多模型提示词增强器",
+     "Shaobkj_Media_Reverse_Prompt": "🔍视频/图片-反推",
+     "Shaobkj_ForLoop_Start": "🤖循环开始",
+     "Shaobkj_ForLoop_End": "🤖循环结束",
+     "Shaobkj_Loop_Trigger": "🔁循环触发",
+     "Shaobkj_NanoBanana_Prompt": "🤖香蕉专属提示词",
+     "Shaobkj_LoadImageListFromDir": "🤖加载图像列表(路径)",
+     "Shaobkj_ResolutionJudge": "🤖分辨率智能判断",
+     "Shaobkj_GetEdgeLength": "🤖获取边长",
+     "Shaobkj_Load_Florence2_Model": "🤖加载Florence2模型(急速)",
+     "Shaobkj_Florence2_Fast_Prompt": "🤖图像急速反推",
+diff --git a/prompt_enhancer_types.py b/prompt_enhancer_types.py
+new file mode 100644
+index 0000000..2663850
+--- /dev/null
++++ b/prompt_enhancer_types.py
+@@ -0,0 +1,58 @@
++from dataclasses import dataclass
++from typing import Any, Literal, Protocol, Sequence
++
++
++FeatureType = Literal["H3", "Seedance", "Music 3"]
++ChannelType = Literal["自动", "本地模型", "API"]
++
++
++@dataclass(frozen=True)
++class MediaItem:
++    name: str
++    value: Any
++
++
++@dataclass(frozen=True)
++class MediaBundle:
++    images: Sequence[MediaItem] = ()
++    videos: Sequence[MediaItem] = ()
++    audios: Sequence[MediaItem] = ()
++
++
++@dataclass(frozen=True)
++class GenerationRequest:
++    system_prompt: str
++    user_prompt: str
++    image_data_uris: Sequence[str] = ()
++    seed: int = 0
++    temperature: float = 0.4
++    max_tokens: int = 8192
++
++
++class PromptEnhancerError(RuntimeError):
++    """Base error safe to show in ComfyUI."""
++
++
++class ModelSelectionError(PromptEnhancerError):
++    """Selected channel/model cannot satisfy the task."""
++
++
++class RuntimeInstallError(PromptEnhancerError):
++    """Pinned local runtime could not be prepared."""
++
++
++class LocalPreparationError(PromptEnhancerError):
++    """Local device or server failed before the inference POST."""
++
++
++class ProviderError(PromptEnhancerError):
++    """One model request failed or returned no text."""
++
++
++class CompilerOutputError(PromptEnhancerError):
++    """Nonempty provider output violates a hard protocol invariant."""
++
++
++class TextProvider(Protocol):
++    def generate(self, request: GenerationRequest) -> str:
++        raise NotImplementedError
+diff --git a/test_h3_video_prompt.py b/test_h3_video_prompt.py
+index 2d3bc53..c1d1d72 100644
+--- a/test_h3_video_prompt.py
++++ b/test_h3_video_prompt.py
+@@ -33,25 +33,24 @@ def _load_reference_manifest_parser():
+ 
+ def _load_node_module():
+     package = types.ModuleType("shaobkj")
+     package.__path__ = [str(PROJECT_ROOT)]
+     sys.modules["shaobkj"] = package
+     sys.modules.pop("shaobkj.node_h3_video_prompt", None)
+     return importlib.import_module("shaobkj.node_h3_video_prompt")
+ 
+ 
+ class H3VideoPromptContractTests(unittest.TestCase):
+-    def test_node_is_registered_with_project_display_name(self):
++    def test_old_node_is_not_registered(self):
+         nodes_tree = ast.parse((PROJECT_ROOT / "nodes.py").read_text(encoding="utf-8"))
+         source = ast.unparse(nodes_tree)
+-        self.assertIn("Shaobkj_H3_Video_Prompt", source)
+-        self.assertIn("视频提示词生成器", source)
++        self.assertNotIn("Shaobkj_H3_Video_Prompt", source)
+ 
+     def test_node_keeps_h3_contract_and_category(self):
+         tree = ast.parse(NODE_FILE.read_text(encoding="utf-8"), filename=str(NODE_FILE))
+         node = next(
+             item
+             for item in tree.body
+             if isinstance(item, ast.ClassDef) and item.name == "Shaobkj_H3_Video_Prompt"
+         )
+         assignments = {
+             target.id: ast.literal_eval(item.value)
+diff --git a/test_multi_prompt_enhancer_contract.py b/test_multi_prompt_enhancer_contract.py
+new file mode 100644
+index 0000000..b4ebf4c
+--- /dev/null
++++ b/test_multi_prompt_enhancer_contract.py
+@@ -0,0 +1,89 @@
++import importlib
++import sys
++import types
++import unittest
++from pathlib import Path
++
++
++PROJECT_ROOT = Path(__file__).resolve().parent
++
++
++def load_module_with_comfy_stubs(filename):
++    package = types.ModuleType("shaobkj")
++    package.__path__ = [str(PROJECT_ROOT)]
++    sys.modules["shaobkj"] = package
++    module_name = f"shaobkj.{Path(filename).stem}"
++    sys.modules.pop(module_name, None)
++    return importlib.import_module(module_name)
++
++
++class MultiPromptEnhancerContractTests(unittest.TestCase):
++    def test_new_node_is_registered_and_old_prompt_node_is_absent(self):
++        source = (PROJECT_ROOT / "nodes.py").read_text(encoding="utf-8")
++        self.assertIn('"Shaobkj_Multi_Prompt_Enhancer"', source)
++        self.assertNotIn('"Shaobkj_H3_Video_Prompt"', source)
++        self.assertIn('"Shaobkj_H3_Video"', source)
++
++    def test_node_has_fixed_public_contract(self):
++        module = load_module_with_comfy_stubs("node_multi_prompt_enhancer.py")
++        node = module.Shaobkj_Multi_Prompt_Enhancer
++        inputs = node.INPUT_TYPES()
++        required = inputs["required"]
++        self.assertEqual(
++            list(required)[:7],
++            [
++                "功能类型",
++                "运行渠道",
++                "模型选择",
++                "API密钥",
++                "创作需求",
++                "输出语言",
++                "随机种",
++            ],
++        )
++        self.assertEqual(required["功能类型"][0], ["H3", "Seedance", "Music 3"])
++        self.assertEqual(required["运行渠道"][0], ["自动", "本地模型", "API"])
++        self.assertEqual(required["模型选择"][0][0], "智能选择")
++        self.assertEqual(required["API密钥"][1]["default"], "")
++        self.assertTrue(required["创作需求"][1]["multiline"])
++        self.assertEqual(required["输出语言"][0], ["自动", "中文", "English", "日本語", "한국어"])
++        self.assertEqual(required["随机种"][1], {"default": 0, "min": 0, "max": 2147483647})
++        self.assertEqual(required["生成模式"][0], ["自动", "T2VA", "I2VA", "FL2VA", "L2VA", "Ref2VA"])
++        self.assertEqual(required["目标时长"][0], ["自动", *[f"{second}秒" for second in range(1, 301)]])
++        self.assertEqual(required["BPM"][0], ["自动", *[str(bpm) for bpm in range(40, 241)]])
++        self.assertEqual(required["原生音频"][0], "BOOLEAN")
++        self.assertEqual(
++            inputs["optional"],
++            {
++                "首帧图": ("IMAGE",),
++                "尾帧图": ("IMAGE",),
++                "参考图片1": ("IMAGE",),
++                "参考视频1": ("VIDEO",),
++                "参考音频1": ("AUDIO",),
++            },
++        )
++        self.assertEqual(node.RETURN_TYPES, ("STRING",))
++        self.assertEqual(node.RETURN_NAMES, ("最终提示词",))
++        self.assertEqual(node.FUNCTION, "generate_prompt")
++        self.assertEqual(node.CATEGORY, "🤖shaobkj-APlbox")
++
++    def test_node_reports_its_unwired_execution_boundary(self):
++        module = load_module_with_comfy_stubs("node_multi_prompt_enhancer.py")
++        with self.assertRaisesRegex(
++            module.PromptEnhancerError, "多模型提示词增强器尚未完成执行接线"
++        ):
++            module.Shaobkj_Multi_Prompt_Enhancer().generate_prompt()
++
++    def test_shared_types_have_frozen_defaults_and_provider_contract(self):
++        types_module = load_module_with_comfy_stubs("prompt_enhancer_types.py")
++        media = types_module.MediaBundle()
++        request = types_module.GenerationRequest("system", "user")
++        self.assertEqual((media.images, media.videos, media.audios), ((), (), ()))
++        self.assertEqual(request.image_data_uris, ())
++        self.assertEqual((request.seed, request.temperature, request.max_tokens), (0, 0.4, 8192))
++        self.assertTrue(issubclass(types_module.ProviderError, types_module.PromptEnhancerError))
++        self.assertEqual(types_module.TextProvider.generate.__annotations__["return"], str)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test_node_contracts.py b/test_node_contracts.py
+index e844ce6..b9a8e0c 100644
+--- a/test_node_contracts.py
++++ b/test_node_contracts.py
+@@ -10,21 +10,21 @@ CATEGORY_BY_CLASS = {
+     "Shaobkj_GPT2Edits_Node": "01 图像生成",
+     "Shaobkj_GPTImage2_Batch_Node": "01 图像生成",
+     "Shaobkj_ConcurrentImageEdit_Sender": "01 图像生成",
+     "Shaobkj_GroupedConcurrentImageEdit": "01 图像生成",
+     "Shaobkj_Doubao_Image": "01 图像生成",
+     "Shaobkj_SD20_Video": "02 视频生成",
+     "Shaobkj_Seedance_Video": "02 视频生成",
+     "Shaobkj_H3_Video": "02 视频生成",
+     "Shaobkj_Grok_Video": "02 视频生成",
+     "Shaobkj_LLM_App": "03 提示词与识别",
+-    "Shaobkj_H3_Video_Prompt": "03 提示词与识别",
++    "Shaobkj_Multi_Prompt_Enhancer": "APlbox",
+     "Shaobkj_Media_Reverse_Prompt": "03 提示词与识别",
+     "Shaobkj_NanoBanana_Prompt": "03 提示词与识别",
+     "Shaobkj_Load_Florence2_Model": "03 提示词与识别",
+     "Shaobkj_Florence2_Fast_Prompt": "03 提示词与识别",
+     "Shaobkj_Text_Process": "03 提示词与识别",
+     "Shaobkj_InfinitePromptJoin": "03 提示词与识别",
+     "Shaobkj_FontStyleSelector": "03 提示词与识别",
+     "Shaobkj_FreeColor": "04 图像处理",
+     "Shaobkj_QuickMark": "04 图像处理",
+     "Shaobkj_ImageSplit": "04 图像处理",
+@@ -166,21 +166,25 @@ class NodeContractTests(unittest.TestCase):
+ 
+             category_assignment = next(
+                 node
+                 for node in class_node.body
+                 if isinstance(node, ast.Assign)
+                 and any(
+                     isinstance(target, ast.Name) and target.id == "CATEGORY"
+                     for target in node.targets
+                 )
+             )
+-            expected_category = f"🤖shaobkj-APlbox/{CATEGORY_BY_CLASS[class_name]}"
++            expected_category = (
++                "🤖shaobkj-APlbox"
++                if class_name == "Shaobkj_Multi_Prompt_Enhancer"
++                else f"🤖shaobkj-APlbox/{CATEGORY_BY_CLASS[class_name]}"
++            )
+             self.assertEqual(
+                 ast.literal_eval(category_assignment.value), expected_category
+             )
+ 
+         self.assertEqual(set(mapping_classes), set(CATEGORY_BY_CLASS))
+ 
+     def test_removed_ui_options_do_not_return(self):
+         model_list_source = (PROJECT_ROOT / "js" / "fixed_api_model_list.js").read_text(
+             encoding="utf-8"
+         )
