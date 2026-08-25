@@ -24,6 +24,7 @@ const NODE_CONFIGS = {
 	Shaobkj_Doubao_Image: { endpoint: "/shaobkj/doubao_image/models", modelWidget: "模型选择", defaults: ["doubao-seedream-5-0-260128", "doubao-seedream-4-0-250828", "doubao-seedream-4-5-251128"] },
 
 	Shaobkj_LLM_App: { endpoint: "/shaobkj/llm_test/models", modelWidget: "模型选择", defaults: ["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview", "gpt-5.4-mini"] },
+	Shaobkj_H3_Video_Prompt: { endpoint: "/shaobkj/llm_test/models", modelWidget: "模型选择", defaults: ["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview", "gpt-5.4-mini"], allowServerCredential: true },
 	Shaobkj_Media_Reverse_Prompt: { endpoint: "/shaobkj/media_reverse/models", modelWidget: "模型名称", defaults: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"] },
 	Shaobkj_NanoBanana_Prompt: { endpoint: "/shaobkj/llm_test/models", modelWidget: "模型选择", defaults: ["gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-3-flash-preview"] },
 
@@ -182,7 +183,7 @@ async function fetchModels(node, config, buttonWidget, nodeTypeName) {
 		console.warn("[Shaobkj-模型列表] 未找到模型控件", config.modelWidget);
 		return;
 	}
-	if (!apiKey) {
+	if (!apiKey && !config.allowServerCredential) {
 		showToast("请到后台查看具体错误", true);
 		console.warn("[Shaobkj-模型列表] API密钥为空");
 		return;

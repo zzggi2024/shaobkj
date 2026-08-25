@@ -113,6 +113,7 @@ const THEME_CONFIG = {
     "Shaobkj_GPTImage2_Batch_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_GPT2Edits_Node": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_LLM_App": { color: "#7D24A6", bgcolor: "#1E0A29" },
+    "Shaobkj_H3_Video_Prompt": { color: "#7D24A6", bgcolor: "#1E0A29" },
     "Shaobkj_Doubao_Image": { color: "#7D24A6", bgcolor: "#1E0A29" },
 
 
@@ -130,9 +131,11 @@ const THEME_CONFIG = {
     // 🎬 导演系列 (视频生成) - Future Blue
     "Shaobkj_SD20_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj_Seedance_Video": { color: "#0091EA", bgcolor: "#001A2E" },
+    "Shaobkj_H3_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "Shaobkj_Grok_Video": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 SD_2.0视频": { color: "#0091EA", bgcolor: "#001A2E" },
     "seedance视频生成": { color: "#0091EA", bgcolor: "#001A2E" },
+    "🎬 H3视频生成": { color: "#0091EA", bgcolor: "#001A2E" },
     "🎬 Grok视频": { color: "#0091EA", bgcolor: "#001A2E" },
 
 
@@ -1121,7 +1124,7 @@ function manageGpt2EditsPairedInputs(node, onlyAdd = false) {
 
     for (let i = node.inputs.length - 1; i >= 0; i--) {
         const inputName = String(node.inputs[i]?.name || "");
-        if (inputName === "mask") {
+        if (inputName === "mask" || (/^mask_\d+$/.test(inputName) && inputName !== "mask_1")) {
             node.removeInput(i);
             changed = true;
         }
@@ -1138,10 +1141,9 @@ function manageGpt2EditsPairedInputs(node, onlyAdd = false) {
     };
 
     const imageInputs = getIndexedInputs("image_");
-    const maskInputs = getIndexedInputs("mask_");
 
     let highestConnectedIndex = 0;
-    for (const input of [...imageInputs, ...maskInputs]) {
+    for (const input of imageInputs) {
         const name = String(input.name || "");
         const idx = parseInt(name.split("_")[1] || "0");
         if (input.link !== null && input.link !== undefined && input.link !== -1) {
@@ -1156,37 +1158,26 @@ function manageGpt2EditsPairedInputs(node, onlyAdd = false) {
 
     for (let i = 1; i <= targetCount; i++) {
         const imageName = `image_${i}`;
-        const maskName = `mask_${i}`;
         if ((node.findInputSlot ? node.findInputSlot(imageName) : -1) === -1) {
             node.addInput(imageName, "IMAGE");
             changed = true;
         }
-        if ((node.findInputSlot ? node.findInputSlot(maskName) : -1) === -1) {
-            node.addInput(maskName, "MASK");
-            changed = true;
-        }
+    }
+
+    if ((node.findInputSlot ? node.findInputSlot("mask_1") : -1) === -1) {
+        node.addInput("mask_1", "MASK");
+        changed = true;
     }
 
     if (!onlyAdd) {
         for (let i = maxInputs; i > targetCount; i--) {
             const imageName = `image_${i}`;
-            const maskName = `mask_${i}`;
             const imageIndex = node.findInputSlot ? node.findInputSlot(imageName) : -1;
-            const maskIndex = node.findInputSlot ? node.findInputSlot(maskName) : -1;
             const imageInput = imageIndex !== -1 ? node.inputs[imageIndex] : null;
-            const maskInput = maskIndex !== -1 ? node.inputs[maskIndex] : null;
             const imageLinked = imageInput && imageInput.link !== null && imageInput.link !== undefined && imageInput.link !== -1;
-            const maskLinked = maskInput && maskInput.link !== null && maskInput.link !== undefined && maskInput.link !== -1;
-            if (!imageLinked && !maskLinked) {
-                if (maskIndex !== -1) {
-                    node.removeInput(maskIndex);
-                    changed = true;
-                }
-                const refreshedImageIndex = node.findInputSlot ? node.findInputSlot(imageName) : -1;
-                if (refreshedImageIndex !== -1) {
-                    node.removeInput(refreshedImageIndex);
-                    changed = true;
-                }
+            if (!imageLinked && imageIndex !== -1) {
+                node.removeInput(imageIndex);
+                changed = true;
             }
         }
     }
