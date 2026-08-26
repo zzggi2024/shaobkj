@@ -81,6 +81,28 @@ export function modelSelectionAfterRefresh(currentValue, models) {
   return options.has(current) ? current : "智能选择";
 }
 
+export function setWidgetVisibility(widget, visible) {
+  if (!widget) return;
+  if (!widget.__shaobkjEnhancerDisplayState) {
+    widget.__shaobkjEnhancerDisplayState = {
+      type: widget.type,
+      computeSize: widget.computeSize,
+    };
+  }
+  const original = widget.__shaobkjEnhancerDisplayState;
+  if (visible) {
+    widget.type = original.type;
+    if (original.computeSize) widget.computeSize = original.computeSize;
+    else delete widget.computeSize;
+    widget.hidden = false;
+    return;
+  }
+  widget.type = "hidden";
+  // Cloud-hosted legacy frontends still reserve one widget row unless it is cancelled.
+  widget.computeSize = () => [0, -20];
+  widget.hidden = true;
+}
+
 export function createLatestRequestQueue(worker) {
   let running = false;
   let latestValue;

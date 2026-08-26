@@ -10,6 +10,7 @@ import {
   persistModelLock,
   reconcileFeaturePorts,
   reconcileSeries,
+  setWidgetVisibility,
   visibleWidgetNames,
 } from "./multi_prompt_enhancer_policy.mjs";
 
@@ -38,27 +39,6 @@ function widgetValues(node) {
   }
   values.__advancedExpanded = Boolean(findWidget(node, ADVANCED_WIDGET)?.value);
   return values;
-}
-
-function setWidgetVisible(widget, visible) {
-  if (!widget) return;
-  if (!widget.__shaobkjEnhancerDisplayState) {
-    widget.__shaobkjEnhancerDisplayState = {
-      type: widget.type,
-      computeSize: widget.computeSize,
-    };
-  }
-  const original = widget.__shaobkjEnhancerDisplayState;
-  if (visible) {
-    widget.type = original.type;
-    if (original.computeSize) widget.computeSize = original.computeSize;
-    else delete widget.computeSize;
-    widget.hidden = false;
-    return;
-  }
-  widget.type = "hidden";
-  widget.computeSize = () => [0, -4];
-  widget.hidden = true;
 }
 
 function updateCombo(widget, values, fallback) {
@@ -211,7 +191,7 @@ function applyNodePolicy(node, { conservative = false } = {}) {
     const feature = String(values[FEATURE_WIDGET] || "H3");
     const visible = visibleWidgetNames(feature, values);
     for (const widget of node.widgets || []) {
-      setWidgetVisible(
+      setWidgetVisibility(
         widget,
         widget.name === ADVANCED_WIDGET
           || widget.name === FETCH_MODELS_WIDGET
