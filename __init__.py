@@ -462,17 +462,28 @@ def _device_payload():
     }
     _write_device_config(payload)
     return _device_response_payload(payload)
-def _remote_validate(access_key):
+def _remote_validate_result(access_key):
     access_key = (access_key or "").strip()
-    if not access_key: return False
+    if not access_key: return False, "授权码不能为空"
     body = _json.dumps({"code": _AUTH_SCOPE, "access_key": access_key, "key": access_key, **_device_payload()}, ensure_ascii=False).encode("utf-8")
     request = _ur.Request(_API_BASE + "/Shaobkj/api/access/validate", data=body, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with _ur.urlopen(request, timeout=15) as response:
             data = _json.loads(response.read().decode("utf-8"))
-    except Exception:
-        return False
-    return bool(data.get("valid")) and data.get("status") == "active"
+    except _ue.HTTPError as exc:
+        return False, f"授权服务器返回 HTTP {exc.code}"
+    except _ue.URLError as exc:
+        return False, f"无法连接授权服务器: {exc.reason}"
+    except Exception as exc:
+        return False, f"授权验证异常: {type(exc).__name__}: {exc}"
+    if not data.get("valid"):
+        return False, f"授权码无效，服务器状态: {data.get('status') or 'unknown'}"
+    if data.get("status") != "active":
+        return False, f"授权码状态不是 active: {data.get('status') or 'unknown'}"
+    return True, ""
+def _remote_validate(access_key):
+    ok, _message = _remote_validate_result(access_key)
+    return ok
 def _clear_auth():
     try: _AUTH_FILE.unlink()
     except Exception: pass
@@ -502,12 +513,16 @@ def _is_authorized():
     except Exception:
         pass
     return True
-def _save_auth(access_key):
-    if not _remote_validate(access_key):
+def _save_auth_result(access_key):
+    ok, message = _remote_validate_result(access_key)
+    if not ok:
         _clear_auth()
-        return False
+        return False, message
     _AUTH_FILE.write_text(_json.dumps({"ok": True, "auth_scope": _AUTH_SCOPE, "access_key": access_key.strip(), "device": _device_payload(), "validated_at": _time.time()}, ensure_ascii=False), encoding="utf-8")
-    return True
+    return True, ""
+def _save_auth(access_key):
+    ok, _message = _save_auth_result(access_key)
+    return ok
 def _set_configured_instance_id(instance_id):
     normalized = _normalize_instance_id(instance_id)
     if not normalized:
@@ -554,9 +569,10 @@ def _register_auth_routes():
         except Exception:
             payload = {}
         _set_configured_instance_id(payload.get("instance_id") or "")
-        if _save_auth(payload.get("code") or ""):
+        ok, message = _save_auth_result(payload.get("code") or "")
+        if ok:
             return _web.json_response({"ok": True, "message": "授权成功"})
-        return _web.json_response({"ok": False, "message": "授权码错误"}, status=400)
+        return _web.json_response({"ok": False, "message": message or "授权码错误"}, status=400)
 def _wrap_node_class(cls):
     function_name = getattr(cls, "FUNCTION", None)
     if not function_name or getattr(cls, "_shaobkj_auth_wrapped", False): return cls
