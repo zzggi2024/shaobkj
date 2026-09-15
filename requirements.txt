@@ -3,8 +3,3 @@ Pillow
 pandas
 openpyxl
 yt-dlp
-transformers>=4.45.0
-huggingface_hub>=0.23.4
-rapidocr>=3.9.1
-numpy==2.5.2
-opencv-contrib-python==5.0.0.93

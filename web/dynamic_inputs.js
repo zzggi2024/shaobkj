@@ -34,8 +34,6 @@ const DYNAMIC_NODES = [
     "🧩 图像拆分",
     "Shaobkj_ZeroOneFloat",
     "0-1浮点",
-    "Shaobkj_MaskRecognition",
-    "🤖遮罩识别",
 ];
 
 const SHAOBKJ_NODE_TYPES = [
@@ -61,7 +59,6 @@ const SHAOBKJ_NODE_TYPES = [
     "Shaobkj_InfinitePromptJoin",
     "Shaobkj_ImageSplit",
     "Shaobkj_ZeroOneFloat",
-    "Shaobkj_MaskRecognition",
 ];
 
 // 保留现有节点的既有按钮状态；新增节点仅在用户明确要求后加入此列表。
@@ -78,8 +75,6 @@ const API_APPLY_LINK_NODE_TYPES = new Set([
     "Shaobkj_QuickMark",
     "Shaobkj_FontStyleSelector",
     "Shaobkj_CustomVideoSave",
-    "Shaobkj_SmartVideoSplit",
-    "Shaobkj_SmartVideoJoin",
     "Shaobkj_ParamExtract",
     "Shaobkj_SizePreset",
     "Shaobkj_BatchInput",
@@ -330,14 +325,6 @@ function getDynamicInputSpec(node) {
             maxInputs: 9,
             legacyPrefixes: ["image_"],
             legacyNames: ["参考图"],
-        };
-    }
-    if (t === "Shaobkj_MaskRecognition" || (typeof title === "string" && title.includes("遮罩识别"))) {
-        return {
-            prefix: "参考图",
-            slotType: "IMAGE",
-            minInputs: 1,
-            maxInputs: 9,
         };
     }
     if (k.includes("video_edit") || k.includes("视频编辑")) {
